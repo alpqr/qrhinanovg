@@ -19,6 +19,7 @@ static QByteArray getFile(const QString &name)
 
 NVGcontext *vg;
 
+// called once
 void initTest(QRhi *rhi)
 {
     vg = nvgCreateRhi(rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
@@ -35,6 +36,7 @@ void cleanupTest()
     nvgDeleteRhi(vg);
 }
 
+// called on every frame outside the render pass
 void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
 {
     nvgBeginRhi(vg, cb, rt);
@@ -52,6 +54,7 @@ void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
     nvgEnd(vg);
 }
 
+// called one very frame inside the render pass
 void renderTest()
 {
     nvgRender(vg);

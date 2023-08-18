@@ -40,11 +40,11 @@ enum GLNVGshaderType {
 struct GLNVGtexture {
     int id;
     GLuint tex;
-    int width, height;
+    int width;
+    int height;
     int type;
     int flags;
 };
-typedef struct GLNVGtexture GLNVGtexture;
 
 struct GLNVGblend
 {
@@ -53,7 +53,6 @@ struct GLNVGblend
     GLenum srcAlpha;
     GLenum dstAlpha;
 };
-typedef struct GLNVGblend GLNVGblend;
 
 enum GLNVGcallType {
     GLNVG_NONE = 0,
@@ -74,7 +73,6 @@ struct GLNVGcall {
     int fragmentUniformBufferIndex;
     GLNVGblend blendFunc;
 };
-typedef struct GLNVGcall GLNVGcall;
 
 struct GLNVGpath {
     int fillOffset;
@@ -82,7 +80,6 @@ struct GLNVGpath {
     int strokeOffset;
     int strokeCount;
 };
-typedef struct GLNVGpath GLNVGpath;
 
 struct GLNVGfragUniforms {
     float scissorMat[12]; // matrices are actually 3 vec4s
@@ -100,7 +97,130 @@ struct GLNVGfragUniforms {
     int type;
     float viewSize[2];
 };
-typedef struct GLNVGfragUniforms GLNVGfragUniforms;
+
+struct SamplerDesc
+{
+    QRhiSampler::Filter minFilter;
+    QRhiSampler::Filter magFilter;
+    QRhiSampler::Filter mipmap;
+    QRhiSampler::AddressMode hTiling;
+    QRhiSampler::AddressMode vTiling;
+    QRhiSampler::AddressMode zTiling;
+};
+
+inline bool operator==(const SamplerDesc &a, const SamplerDesc &b) Q_DECL_NOTHROW
+{
+    return a.hTiling == b.hTiling && a.vTiling == b.vTiling && a.zTiling == b.zTiling
+           && a.minFilter == b.minFilter && a.magFilter == b.magFilter
+           && a.mipmap == b.mipmap;
+}
+
+struct PipelineState
+{
+    QRhiGraphicsPipeline::Topology topology = QRhiGraphicsPipeline::Triangles;
+    QRhiVertexInputLayout inputLayout;
+
+    int samples = 1;
+
+    QRhiGraphicsPipeline::CullMode cullMode = QRhiGraphicsPipeline::None;
+
+    bool depthTestEnable = false;
+    bool depthWriteEnable = false;
+    QRhiGraphicsPipeline::CompareOp depthFunc = QRhiGraphicsPipeline::LessOrEqual;
+
+    bool stencilTestEnable = false;
+    bool usesStencilRef = false;
+    QRhiGraphicsPipeline::StencilOpState stencilFront;
+    QRhiGraphicsPipeline::StencilOpState stencilBack;
+    quint32 stencilReadMask = 0xFF;
+    quint32 stencilWriteMask = 0xFF;
+
+    bool blendEnable = false;
+    QRhiGraphicsPipeline::TargetBlend targetBlend;
+
+    QShader vertexStage;
+    QShader fragmentStage;
+};
+
+inline bool operator==(const PipelineState &a, const PipelineState &b) Q_DECL_NOTHROW
+{
+    return a.topology == b.topology
+           && a.inputLayout == b.inputLayout
+           && a.samples == b.samples
+           && a.cullMode == b.cullMode
+           && a.depthTestEnable == b.depthTestEnable
+           && a.depthWriteEnable == b.depthWriteEnable
+           && a.depthFunc == b.depthFunc
+           && a.stencilTestEnable == b.stencilTestEnable
+           && a.usesStencilRef == b.usesStencilRef
+           && (std::memcmp(&a.stencilFront, &b.stencilFront, sizeof(QRhiGraphicsPipeline::StencilOpState)) == 0)
+           && (std::memcmp(&a.stencilBack, &b.stencilBack, sizeof(QRhiGraphicsPipeline::StencilOpState)) == 0)
+           && a.stencilReadMask == b.stencilReadMask
+           && a.stencilWriteMask == b.stencilWriteMask
+           && a.blendEnable == b.blendEnable
+           && (std::memcmp(&a.targetBlend, &b.targetBlend, sizeof(QRhiGraphicsPipeline::TargetBlend)) == 0)
+           && a.vertexStage == b.vertexStage
+           && a.fragmentStage == b.fragmentStage;
+}
+
+inline bool operator!=(const PipelineState &a, const PipelineState &b) Q_DECL_NOTHROW
+{
+    return !(a == b);
+}
+
+inline size_t qHash(const PipelineState &s, size_t seed) Q_DECL_NOTHROW
+{
+    // do not bother with all fields
+    return qHash(s.fragmentStage, seed)
+           ^ qHash(s.samples)
+           ^ qHash(s.targetBlend.dstColor)
+           ^ qHash(s.depthFunc)
+           ^ qHash(s.cullMode)
+           ^ qHashBits(&s.stencilFront, sizeof(QRhiGraphicsPipeline::StencilOpState))
+           ^ (s.depthTestEnable << 1)
+           ^ (s.depthWriteEnable << 2)
+           ^ (s.stencilTestEnable << 3)
+           ^ (s.blendEnable << 4)
+           ^ (s.usesStencilRef << 5);
+}
+
+struct PipelineStateKey
+{
+    PipelineState state;
+    QVector<quint32> renderTargetDescription;
+    QVector<quint32> srbLayoutDescription;
+    struct {
+        size_t renderTargetDescriptionHash;
+        size_t srbLayoutDescriptionHash;
+    } extra;
+    static PipelineStateKey create(const PipelineState &state,
+                                   const QRhiRenderPassDescriptor *rpDesc,
+                                   const QRhiShaderResourceBindings *srb)
+    {
+        const QVector<quint32> rtDesc = rpDesc->serializedFormat();
+        const QVector<quint32> srbDesc = srb->serializedLayoutDescription();
+        return { state, rtDesc, srbDesc, { qHash(rtDesc), qHash(srbDesc) } };
+    }
+};
+
+inline bool operator==(const PipelineStateKey &a, const PipelineStateKey &b) Q_DECL_NOTHROW
+{
+    return a.state == b.state
+           && a.renderTargetDescription == b.renderTargetDescription
+           && a.srbLayoutDescription == b.srbLayoutDescription;
+}
+
+inline bool operator!=(const PipelineStateKey &a, const PipelineStateKey &b) Q_DECL_NOTHROW
+{
+    return !(a == b);
+}
+
+inline size_t qHash(const PipelineStateKey &k, size_t seed) Q_DECL_NOTHROW
+{
+    return qHash(k.state, seed)
+           ^ k.extra.renderTargetDescriptionHash
+           ^ k.extra.srbLayoutDescriptionHash;
+}
 
 struct GLNVGcontext {
     QRhi *rhi;
@@ -138,8 +258,91 @@ struct GLNVGcontext {
     int nuniforms;
 
     int dummyTex;
+
+    QVector<std::pair<SamplerDesc, QRhiSampler*>> samplers;
+    QHash<PipelineStateKey, QRhiGraphicsPipeline *> pipelines;
 };
-typedef struct GLNVGcontext GLNVGcontext;
+
+static QRhiSampler *sampler(GLNVGcontext* gl, const SamplerDesc &samplerDescription)
+{
+    auto compareSampler = [samplerDescription](const std::pair<SamplerDesc, QRhiSampler*> &info) {
+        return info.first == samplerDescription;
+    };
+    const auto found = std::find_if(gl->samplers.cbegin(), gl->samplers.cend(), compareSampler);
+    if (found != gl->samplers.cend())
+        return found->second;
+
+    QRhiSampler *newSampler = gl->rhi->newSampler(samplerDescription.magFilter,
+                                                  samplerDescription.minFilter,
+                                                  samplerDescription.mipmap,
+                                                  samplerDescription.hTiling,
+                                                  samplerDescription.vTiling,
+                                                  samplerDescription.zTiling);
+    if (!newSampler->create()) {
+        qWarning("Failed to build image sampler");
+        delete newSampler;
+        return nullptr;
+    }
+    gl->samplers << std::make_pair(samplerDescription, newSampler);
+    return newSampler;
+}
+
+static QRhiGraphicsPipeline *pipeline(GLNVGcontext* gl,
+                                      const PipelineStateKey &key,
+                                      QRhiRenderPassDescriptor *rpDesc,
+                                      QRhiShaderResourceBindings *srb)
+{
+    auto it = gl->pipelines.constFind(key);
+    if (it != gl->pipelines.constEnd())
+        return it.value();
+
+    QRhiGraphicsPipeline *ps = gl->rhi->newGraphicsPipeline();
+
+    ps->setShaderStages({
+        { QRhiShaderStage::Vertex, key.state.vertexStage },
+        { QRhiShaderStage::Fragment, key.state.fragmentStage }
+    });
+    ps->setVertexInputLayout(key.state.inputLayout);
+    ps->setShaderResourceBindings(srb);
+    ps->setRenderPassDescriptor(rpDesc);
+
+    QRhiGraphicsPipeline::Flags flags;
+    if (key.state.usesStencilRef)
+        flags |= QRhiGraphicsPipeline::UsesStencilRef;
+    ps->setFlags(flags);
+
+    ps->setTopology(key.state.topology);
+    ps->setCullMode(key.state.cullMode);
+
+    QRhiGraphicsPipeline::TargetBlend blend = key.state.targetBlend;
+    blend.enable = key.state.blendEnable;
+    const int colorAttachmentCount = 1;
+    QVarLengthArray<QRhiGraphicsPipeline::TargetBlend, 8> targetBlends(colorAttachmentCount);
+    for (int i = 0; i < colorAttachmentCount; ++i)
+        targetBlends[i] = blend;
+    ps->setTargetBlends(targetBlends.cbegin(), targetBlends.cend());
+
+    ps->setSampleCount(key.state.samples);
+
+    ps->setDepthTest(key.state.depthTestEnable);
+    ps->setDepthWrite(key.state.depthWriteEnable);
+    ps->setDepthOp(key.state.depthFunc);
+
+    ps->setStencilTest(key.state.stencilTestEnable);
+    ps->setStencilFront(key.state.stencilFront);
+    ps->setStencilBack(key.state.stencilBack);
+    ps->setStencilReadMask(key.state.stencilReadMask);
+    ps->setStencilWriteMask(key.state.stencilWriteMask);
+
+    if (!ps->create()) {
+        qWarning("Failed to build graphics pipeline state");
+        delete ps;
+        return nullptr;
+    }
+
+    gl->pipelines.insert(key, ps);
+    return ps;
+}
 
 #define QGL QOpenGLContext::currentContext()->extraFunctions()
 
@@ -1249,6 +1452,11 @@ error:
 
 void nvgDeleteRhi(NVGcontext* ctx)
 {
+    GLNVGcontext* gl = (GLNVGcontext*) nvgInternalParams(ctx)->userPtr;
+    qDeleteAll(gl->pipelines);
+    for (const auto &samplerInfo : std::as_const(gl->samplers))
+        delete samplerInfo.second;
+
     nvgDeleteInternal(ctx);
 }
 
