@@ -369,39 +369,12 @@ void nvgDeleteInternal(NVGcontext* ctx)
     free(ctx);
 }
 
-void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float devicePixelRatio)
+void nvgBegin(NVGcontext* ctx, float windowWidth, float windowHeight, float devicePixelRatio)
 {
 /*	printf("Tris: draws:%d  fill:%d  stroke:%d  text:%d  TOT:%d\n",
         ctx->drawCallCount, ctx->fillTriCount, ctx->strokeTriCount, ctx->textTriCount,
         ctx->fillTriCount+ctx->strokeTriCount+ctx->textTriCount);*/
 
-    ctx->nstates = 0;
-    nvgSave(ctx);
-    nvgReset(ctx);
-
-    nvg__setDevicePixelRatio(ctx, devicePixelRatio);
-
-    ctx->params.renderViewport(ctx->params.userPtr, windowWidth, windowHeight, devicePixelRatio);
-
-    ctx->drawCallCount = 0;
-    ctx->fillTriCount = 0;
-    ctx->strokeTriCount = 0;
-    ctx->textTriCount = 0;
-}
-
-void nvgCancelFrame(NVGcontext* ctx)
-{
-    ctx->params.renderCancel(ctx->params.userPtr);
-}
-
-void nvgFlushFrame(NVGcontext* ctx)
-{
-    ctx->params.renderFlush(ctx->params.userPtr);
-}
-
-void nvgEndFrame(NVGcontext* ctx)
-{
-    ctx->params.renderFlush(ctx->params.userPtr);
     if (ctx->fontImageIdx != 0) {
         int fontImage = ctx->fontImages[ctx->fontImageIdx];
         ctx->fontImages[ctx->fontImageIdx] = 0;
@@ -427,6 +400,29 @@ void nvgEndFrame(NVGcontext* ctx)
         ctx->fontImages[0] = fontImage;
         ctx->fontImageIdx = 0;
     }
+
+    ctx->nstates = 0;
+    nvgSave(ctx);
+    nvgReset(ctx);
+
+    nvg__setDevicePixelRatio(ctx, devicePixelRatio);
+
+    ctx->params.renderViewport(ctx->params.userPtr, windowWidth, windowHeight, devicePixelRatio);
+
+    ctx->drawCallCount = 0;
+    ctx->fillTriCount = 0;
+    ctx->strokeTriCount = 0;
+    ctx->textTriCount = 0;
+}
+
+void nvgEnd(NVGcontext *ctx)
+{
+    ctx->params.renderEndPrepare(ctx->params.userPtr);
+}
+
+void nvgRender(NVGcontext* ctx)
+{
+    ctx->params.renderRender(ctx->params.userPtr);
 }
 
 NVGcolor nvgRGB(unsigned char r, unsigned char g, unsigned char b)

@@ -152,20 +152,9 @@ enum NVGimageFlags {
 // For example, GLFW returns two dimension for an opened window: window size and
 // frame buffer size. In that case you would set windowWidth/Height to the window size
 // devicePixelRatio to: frameBufferWidth / windowWidth.
-void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float devicePixelRatio);
-
-// Cancels drawing the current frame.
-void nvgCancelFrame(NVGcontext* ctx);
-
-// Issues the draw calls queued up since BeginFrame or the last FlushFrame.
-// Relevant mainly if the 64 KB limit on uniform buffers is a problem. (If the
-// alignment requirement is 256 then max draw calls is only 256!). In which
-// case one can call FlushFrame and then continue, without having to do
-// End/Begin and so lose all the state.
-void nvgFlushFrame(NVGcontext *ctx);
-
-// Ends drawing flushing remaining render state.
-void nvgEndFrame(NVGcontext* ctx);
+void nvgBegin(NVGcontext* ctx, float windowWidth, float windowHeight, float devicePixelRatio);
+void nvgEnd(NVGcontext *ctx);
+void nvgRender(NVGcontext *ctx);
 
 //
 // Composite operation
@@ -673,12 +662,12 @@ struct NVGparams {
     int (*renderUpdateTexture)(void* uptr, int image, int x, int y, int w, int h, const unsigned char* data);
     int (*renderGetTextureSize)(void* uptr, int image, int* w, int* h);
     void (*renderViewport)(void* uptr, float width, float height, float devicePixelRatio);
-    void (*renderCancel)(void* uptr);
-    void (*renderFlush)(void* uptr);
     void (*renderFill)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
     void (*renderStroke)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, const NVGpath* paths, int npaths);
     void (*renderTriangles)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe);
     void (*renderDelete)(void* uptr);
+    void (*renderEndPrepare)(void* uptr);
+    void (*renderRender)(void* uptr);
 };
 typedef struct NVGparams NVGparams;
 

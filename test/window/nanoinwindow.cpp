@@ -19,9 +19,9 @@ static QByteArray getFile(const QString &name)
 
 NVGcontext *vg;
 
-void initTest()
+void initTest(QRhi *rhi)
 {
-    vg = nvgCreateRhi(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+    vg = nvgCreateRhi(rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
 
     QByteArray font = getFile(QLatin1String(":/fonts/RobotoMono-Medium.ttf"));
     unsigned char *fontData = (unsigned char *) malloc(font.size());
@@ -35,24 +35,26 @@ void cleanupTest()
     nvgDeleteRhi(vg);
 }
 
-void renderTest(QRhi *rhi, QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
+void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
 {
-    nvgBeginFrameRhi(vg, rhi, cb, rt);
+    nvgBeginRhi(vg, cb, rt);
 
     nvgBeginPath(vg);
-	nvgRect(vg, 10, 10, 200, 200);
-	nvgFillColor(vg, nvgRGBA(255, 0, 0, 255));
+    nvgRect(vg, 10, 10, 200, 200);
+    nvgFillColor(vg, nvgRGBA(255, 0, 0, 255));
+    nvgFill(vg);
 
-    //nvgFlushFrame(vg);
+    nvgFontFace(vg, "font");
+    nvgFontSize(vg, 36.0f);
+    nvgFillColor(vg, nvgRGBA(220, 0, 220, 255));
+    nvgText(vg, 10, 300, "hello world", nullptr);
 
-	nvgFill(vg);
+    nvgEnd(vg);
+}
 
-	nvgFontFace(vg, "font");
-	nvgFontSize(vg, 36.0f);
-	nvgFillColor(vg, nvgRGBA(220, 0, 220, 255));
-	nvgText(vg, 10, 300, "hello world", nullptr);
-
-    nvgEndFrame(vg);
+void renderTest()
+{
+    nvgRender(vg);
 }
 
 static float vertexData[] = {
@@ -291,7 +293,7 @@ void Window::init()
 
     m_ps->create();
 
-    initTest();
+    initTest(m_rhi.get());
 }
 
 void Window::resizeSwapChain()
@@ -357,6 +359,9 @@ void Window::render()
     }
     u->updateDynamicBuffer(m_ubuf.get(), 64, 4, &m_opacity);
 
+    m_rhi->makeThreadLocalNativeContextCurrent();
+    prepareRenderTest(cb, rt);
+
     cb->beginPass(rt, QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u, QRhiCommandBuffer::ExternalContent);
 
     cb->setGraphicsPipeline(m_ps.get());
@@ -368,7 +373,7 @@ void Window::render()
     cb->draw(3);
 
     cb->beginExternal();
-    renderTest(m_rhi.get(), cb, rt);
+    renderTest();
     cb->endExternal();
 
     cb->endPass();
