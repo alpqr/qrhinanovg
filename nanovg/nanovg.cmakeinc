@@ -1,0 +1,34 @@
+set(nanovg_sources
+    ${nanovg_base}/nanovg/nanovg.c
+    ${nanovg_base}/nanovg/nanovg_rhi.cpp
+)
+
+target_sources(${nanovg_target} PRIVATE
+    ${nanovg_sources}
+)
+
+target_include_directories(${nanovg_target} PRIVATE
+    ${nanovg_base}
+    ${nanovg_base}/nanovg
+)
+
+qt6_add_shaders(${nanovg_target} "nanovg_shaders"
+    PREFIX
+        "/nanovg_shaders"
+    BASE
+        ${nanovg_base}/nanovg
+    FILES
+        ${nanovg_base}/nanovg/fill.vert
+        ${nanovg_base}/nanovg/fill.frag
+)
+
+qt6_add_shaders(${nanovg_target} "nanovg_shaders_edgeaa"
+    PREFIX
+        "/nanovg_shaders"
+    FILES
+        ${nanovg_base}/nanovg/fill.frag
+    OUTPUTS
+        fill_edgeaa.frag.qsb
+    DEFINES
+        EDGE_AA
+)
