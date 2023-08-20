@@ -41,6 +41,7 @@ enum GLNVGshaderType {
 struct GLNVGtexture {
     int id;
     GLuint tex;
+    QRhiTexture *rhiTex;
     int width;
     int height;
     int type;
@@ -298,34 +299,8 @@ struct RhiNvgContext
     QRhiBuffer *rhiIndexBuffer = nullptr;
     QRhiBuffer *rhiVSUniformBuffer = nullptr;
     QRhiBuffer *rhiFSUniformBuffer = nullptr;
-    QRhiTexture *rhiDummyTexture = nullptr;
-
-    QVector<quint32> fanEmuIndexPrep;
+    QRhiResourceUpdateBatch *resourceUpdates = nullptr;
 };
-
-static QRhiSampler *sampler(RhiNvgContext *rc, const SamplerDesc &samplerDescription)
-{
-    auto compareSampler = [samplerDescription](const std::pair<SamplerDesc, QRhiSampler*> &info) {
-        return info.first == samplerDescription;
-    };
-    const auto found = std::find_if(rc->samplers.cbegin(), rc->samplers.cend(), compareSampler);
-    if (found != rc->samplers.cend())
-        return found->second;
-
-    QRhiSampler *newSampler = rc->rhi->newSampler(samplerDescription.magFilter,
-                                                  samplerDescription.minFilter,
-                                                  samplerDescription.mipmap,
-                                                  samplerDescription.hTiling,
-                                                  samplerDescription.vTiling,
-                                                  samplerDescription.zTiling);
-    if (!newSampler->create()) {
-        qWarning("Failed to build image sampler");
-        delete newSampler;
-        return nullptr;
-    }
-    rc->samplers << std::make_pair(samplerDescription, newSampler);
-    return newSampler;
-}
 
 static QRhiGraphicsPipeline *pipeline(RhiNvgContext *rc,
                                       const PipelineStateKey &key,
@@ -384,6 +359,57 @@ static QRhiGraphicsPipeline *pipeline(RhiNvgContext *rc,
     return ps;
 }
 
+static QRhiSampler *sampler(RhiNvgContext *rc, const SamplerDesc &samplerDescription)
+{
+    auto compareSampler = [samplerDescription](const std::pair<SamplerDesc, QRhiSampler*> &info) {
+        return info.first == samplerDescription;
+    };
+    const auto found = std::find_if(rc->samplers.cbegin(), rc->samplers.cend(), compareSampler);
+    if (found != rc->samplers.cend())
+        return found->second;
+
+    QRhiSampler *newSampler = rc->rhi->newSampler(samplerDescription.magFilter,
+                                                  samplerDescription.minFilter,
+                                                  samplerDescription.mipmap,
+                                                  samplerDescription.hTiling,
+                                                  samplerDescription.vTiling,
+                                                  samplerDescription.zTiling);
+    if (!newSampler->create()) {
+        qWarning("Failed to build image sampler");
+        delete newSampler;
+        return nullptr;
+    }
+    rc->samplers << std::make_pair(samplerDescription, newSampler);
+    return newSampler;
+}
+
+static bool ensureBufferCapacity(QRhiBuffer **buf, quint32 size)
+{
+    if ((*buf)->size() < size) {
+        (*buf)->setSize(size);
+        if (!(*buf)->create()) {
+            qWarning("Failed to recreate buffer with size %u", size);
+            return false;
+        }
+    }
+    return true;
+}
+
+static QRhiResourceUpdateBatch *resourceUpdateBatch(RhiNvgContext *rc)
+{
+    if (!rc->resourceUpdates)
+        rc->resourceUpdates = rc->rhi->nextResourceUpdateBatch();
+    return rc->resourceUpdates;
+}
+
+static void commitResourceUpdates(RhiNvgContext *rc)
+{
+    if (rc->resourceUpdates) {
+        rc->cb->resourceUpdate(rc->resourceUpdates);
+        rc->resourceUpdates = nullptr;
+    }
+}
+
 #define QGL QOpenGLContext::currentContext()->extraFunctions()
 
 static GLNVGtexture* glnvg__allocTexture(RhiNvgContext *rc)
@@ -431,11 +457,57 @@ static int glnvg__deleteTexture(RhiNvgContext *rc, int id)
         if (rc->textures[i].id == id) {
             if (rc->textures[i].tex != 0 && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
                 QGL->glDeleteTextures(1, &rc->textures[i].tex);
+            if (rc->textures[i].rhiTex && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
+                delete rc->textures[i].rhiTex;
             memset(&rc->textures[i], 0, sizeof(rc->textures[i]));
             return 1;
         }
     }
     return 0;
+}
+
+static QRhiShaderResourceBindings *createSrb(RhiNvgContext *rc)
+{
+    QRhiShaderResourceBindings *srb = rc->rhi->newShaderResourceBindings();
+    srb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage, nullptr),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, nullptr, sizeof(GLNVGfragUniforms)),
+        QRhiShaderResourceBinding::sampledTexture(2, QRhiShaderResourceBinding::FragmentStage, nullptr, nullptr)
+    });
+    if (!srb->create()) {
+        qWarning("Failed to create resource bindings (layout)");
+        delete srb;
+        return nullptr;
+    }
+    return srb;
+}
+
+static void updateTextureAndSamplerInSrb(RhiNvgContext *rc, QRhiShaderResourceBindings *srb, int image)
+{
+    GLNVGtexture* tex = NULL;
+    if (image != 0) {
+        tex = glnvg__findTexture(rc, image);
+    }
+    // If no image is set, use empty texture
+    if (tex == NULL) {
+        tex = glnvg__findTexture(rc, rc->dummyTex);
+    }
+
+    if (tex && tex->rhiTex) {
+        SamplerDesc samplerDesc;
+        samplerDesc.minFilter = (tex->flags & NVG_IMAGE_NEAREST) ? QRhiSampler::Nearest : QRhiSampler::Linear;
+        samplerDesc.magFilter = (tex->flags & NVG_IMAGE_NEAREST) ? QRhiSampler::Nearest : QRhiSampler::Linear;
+        samplerDesc.mipmap = (tex->flags & NVG_IMAGE_GENERATE_MIPMAPS) ? ((tex->flags & NVG_IMAGE_NEAREST) ? QRhiSampler::Nearest : QRhiSampler::Linear) : QRhiSampler::None;
+        samplerDesc.hTiling = (tex->flags & NVG_IMAGE_REPEATX) ? QRhiSampler::Repeat : QRhiSampler::ClampToEdge;
+        samplerDesc.vTiling = (tex->flags & NVG_IMAGE_REPEATY) ? QRhiSampler::Repeat : QRhiSampler::ClampToEdge;
+        samplerDesc.zTiling = QRhiSampler::Repeat;
+        srb->setBindings({
+            QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage, rc->rhiVSUniformBuffer),
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, rc->rhiFSUniformBuffer, sizeof(GLNVGfragUniforms)),
+            QRhiShaderResourceBinding::sampledTexture(2, QRhiShaderResourceBinding::FragmentStage, tex->rhiTex, sampler(rc, samplerDesc))
+        });
+        srb->updateResources(QRhiShaderResourceBindings::BindingsAreSorted);
+    }
 }
 
 static void glnvg__dumpShaderError(GLuint shader, const char* name, const char* type)
@@ -708,13 +780,28 @@ static int glnvg__renderCreate(void* uptr)
 
     // Some platforms does not allow to have samples to unset textures.
     // Create empty one which is bound when there's no texture specified.
-    rc->dummyTex = glnvg__renderCreateTexture(rc, NVG_TEXTURE_ALPHA, 1, 1, 0, NULL);
+    rc->dummyTex = glnvg__renderCreateTexture(rc, NVG_TEXTURE_ALPHA, 16, 16, 0, NULL);
 
     rc->rhiVertexBuffer = rc->rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::VertexBuffer, 16384);
+    if (!rc->rhiVertexBuffer->create()) {
+        qWarning("Failed to create vertex buffer");
+        return 0;
+    }
     rc->rhiIndexBuffer = rc->rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::IndexBuffer, 16384);
+    if (!rc->rhiIndexBuffer->create()) {
+        qWarning("Failed to create index buffer");
+        return 0;
+    }
     rc->rhiVSUniformBuffer = rc->rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, 64);
+    if (!rc->rhiVSUniformBuffer->create()) {
+        qWarning("Failed to create uniform buffer 0");
+        return 0;
+    }
     rc->rhiFSUniformBuffer = rc->rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, 16384);
-    rc->rhiDummyTexture = rc->rhi->newTexture(QRhiTexture::R8, QSize(16, 16));
+    if (!rc->rhiFSUniformBuffer->create()) {
+        qWarning("Failed to create uniform buffer 1");
+        return 0;
+    }
 
     return 1;
 }
@@ -722,15 +809,43 @@ static int glnvg__renderCreate(void* uptr)
 static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int imageFlags, const unsigned char* data)
 {
     RhiNvgContext *rc = (RhiNvgContext*)uptr;
+
+    QRhiTexture::Format format = QRhiTexture::RGBA8;
+    quint32 byteSize = w * h * 4;
+    if (type == NVG_TEXTURE_ALPHA) {
+        format = QRhiTexture::R8; // this excludes supporting OpenGL ES 2.0 but perhaps that's fine
+        byteSize = w * h;
+    }
+
+    QRhiTexture::Flags flags;
+    if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS)
+        flags |= QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips;
+
+    QRhiTexture *t = rc->rhi->newTexture(format, QSize(w, h), 1, flags);
+    if (!t->create()) {
+        qWarning("Failed to create texture of size %dx%d", w, h);
+        delete t;
+        return 0;
+    }
+
     GLNVGtexture* tex = glnvg__allocTexture(rc);
 
     if (tex == NULL) return 0;
 
     QGL->glGenTextures(1, &tex->tex);
+
     tex->width = w;
     tex->height = h;
     tex->type = type;
     tex->flags = imageFlags;
+    tex->rhiTex = t;
+
+    QRhiResourceUpdateBatch *u = resourceUpdateBatch(rc);
+    if (data) {
+        QRhiTextureSubresourceUploadDescription image(data, byteSize);
+        QRhiTextureUploadDescription desc({ 0, 0, image });
+        u->uploadTexture(tex->rhiTex, desc);
+    }
 
     QGL->glBindTexture(GL_TEXTURE_2D, tex->tex);
 
@@ -781,6 +896,7 @@ static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int im
 
     if (imageFlags & NVG_IMAGE_GENERATE_MIPMAPS) {
         QGL->glGenerateMipmap(GL_TEXTURE_2D);
+        u->generateMips(tex->rhiTex);
     }
 
     return tex->id;
@@ -1111,6 +1227,20 @@ static void glnvg__renderEndPrepare(void* uptr)
     RhiNvgContext *rc = (RhiNvgContext*)uptr;
 
     if (rc->ncalls > 0) {
+        ensureBufferCapacity(&rc->rhiVSUniformBuffer, 2 * sizeof(float));
+        ensureBufferCapacity(&rc->rhiFSUniformBuffer, rc->nuniforms * rc->oneFragmentUniformBufferSize);
+        ensureBufferCapacity(&rc->rhiVertexBuffer, rc->nverts * sizeof(NVGvertex));
+        ensureBufferCapacity(&rc->rhiIndexBuffer, rc->nindices * sizeof(uint32_t));
+
+        QRhiResourceUpdateBatch *u = resourceUpdateBatch(rc);
+        u->updateDynamicBuffer(rc->rhiVSUniformBuffer, 0, 2 * sizeof(float), rc->view);
+        u->updateDynamicBuffer(rc->rhiFSUniformBuffer, 0, rc->nuniforms * rc->oneFragmentUniformBufferSize, rc->uniforms);
+        u->uploadStaticBuffer(rc->rhiVertexBuffer, 0, rc->nverts * sizeof(NVGvertex), rc->verts);
+        if (rc->nindices)
+            u->uploadStaticBuffer(rc->rhiIndexBuffer, 0, rc->nindices * sizeof(uint32_t), rc->indices);
+
+        commitResourceUpdates(rc);
+
         // Upload ubo for frag shaders
         QGL->glBindBuffer(GL_UNIFORM_BUFFER, rc->fragmentUniformBuffer);
         QGL->glBufferData(GL_UNIFORM_BUFFER, rc->nuniforms * rc->oneFragmentUniformBufferSize, rc->uniforms, GL_STREAM_DRAW);
@@ -1497,6 +1627,8 @@ static void glnvg__renderDelete(void* uptr)
     for (i = 0; i < rc->ntextures; i++) {
         if (rc->textures[i].tex != 0 && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
             QGL->glDeleteTextures(1, &rc->textures[i].tex);
+        if (rc->textures[i].rhiTex && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
+            delete rc->textures[i].rhiTex;
     }
     free(rc->textures);
 
@@ -1511,9 +1643,6 @@ static void glnvg__renderDelete(void* uptr)
 
     delete rc->rhiFSUniformBuffer;
     rc->rhiFSUniformBuffer = nullptr;
-
-    delete rc->rhiDummyTexture;
-    rc->rhiDummyTexture = nullptr;
 
     free(rc->paths);
     free(rc->verts);
