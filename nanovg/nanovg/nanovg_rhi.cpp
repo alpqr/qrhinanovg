@@ -68,6 +68,8 @@ struct GLNVGcall {
     int image;
     int pathOffset;
     int pathCount;
+    int indexOffset;
+    int indexCount;
     int triangleOffset;
     int triangleCount;
     int fragmentUniformBufferOffset;
@@ -264,6 +266,7 @@ struct RhiNvgContext
     int ctextures = 0;
     int textureId = 0;
     GLuint vertBuf = 0;
+    GLuint indexBuffer = 0;
     GLuint fragmentUniformBuffer = 0;
     GLuint vertexUniformBuffer = 0;
     int oneFragmentUniformBufferSize = 0;
@@ -279,6 +282,9 @@ struct RhiNvgContext
     struct NVGvertex* verts = nullptr;
     int cverts = 0;
     int nverts = 0;
+    uint32_t *indices = nullptr;
+    int cindices = 0;
+    int nindices = 0;
     unsigned char* uniforms = nullptr;
     int cuniforms = 0;
     int nuniforms = 0;
@@ -289,9 +295,12 @@ struct RhiNvgContext
     QVector<std::pair<SamplerDesc, QRhiSampler*>> samplers;
     QHash<PipelineStateKey, QRhiGraphicsPipeline *> pipelines;
     QRhiBuffer *rhiVertexBuffer = nullptr;
+    QRhiBuffer *rhiIndexBuffer = nullptr;
     QRhiBuffer *rhiVSUniformBuffer = nullptr;
     QRhiBuffer *rhiFSUniformBuffer = nullptr;
     QRhiTexture *rhiDummyTexture = nullptr;
+
+    QVector<quint32> fanEmuIndexPrep;
 };
 
 static QRhiSampler *sampler(RhiNvgContext *rc, const SamplerDesc &samplerDescription)
@@ -687,6 +696,7 @@ static int glnvg__renderCreate(void* uptr)
     rc->texLoc = QGL->glGetUniformLocation(rc->prog, "tex");
 
     QGL->glGenBuffers(1, &rc->vertBuf);
+    QGL->glGenBuffers(1, &rc->indexBuffer);
 
     // Create UBOs
     QGL->glGenBuffers(1, &rc->fragmentUniformBuffer);
@@ -701,6 +711,7 @@ static int glnvg__renderCreate(void* uptr)
     rc->dummyTex = glnvg__renderCreateTexture(rc, NVG_TEXTURE_ALPHA, 1, 1, 0, NULL);
 
     rc->rhiVertexBuffer = rc->rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::VertexBuffer, 16384);
+    rc->rhiIndexBuffer = rc->rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::IndexBuffer, 16384);
     rc->rhiVSUniformBuffer = rc->rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, 64);
     rc->rhiFSUniformBuffer = rc->rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, 16384);
     rc->rhiDummyTexture = rc->rhi->newTexture(QRhiTexture::R8, QSize(16, 16));
@@ -951,8 +962,8 @@ static void glnvg__fill(RhiNvgContext *rc, GLNVGcall* call)
     // set bindpoint for solid loc
     glnvg__setUniforms(rc, call->fragmentUniformBufferOffset, 0);
 
-    for (i = 0; i < npaths; i++)
-        QGL->glDrawArrays(GL_TRIANGLE_FAN, paths[i].fillOffset, paths[i].fillCount);
+    if (call->indexCount)
+        QGL->glDrawElements(GL_TRIANGLES, call->indexCount, GL_UNSIGNED_INT, reinterpret_cast<const void *>(call->indexOffset * sizeof(quint32)));
 
     QGL->glEnable(GL_CULL_FACE);
 
@@ -985,9 +996,11 @@ static void glnvg__convexFill(RhiNvgContext *rc, GLNVGcall* call)
 
     glnvg__setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
 
+    if (call->indexCount)
+        QGL->glDrawElements(GL_TRIANGLES, call->indexCount, GL_UNSIGNED_INT, reinterpret_cast<const void *>(call->indexOffset * sizeof(quint32)));
+
+    // Draw fringes
     for (i = 0; i < npaths; i++) {
-        QGL->glDrawArrays(GL_TRIANGLE_FAN, paths[i].fillOffset, paths[i].fillCount);
-        // Draw fringes
         if (paths[i].strokeCount > 0) {
             QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
         }
@@ -1109,6 +1122,12 @@ static void glnvg__renderEndPrepare(void* uptr)
         // Upload vertex data
         QGL->glBindBuffer(GL_ARRAY_BUFFER, rc->vertBuf);
         QGL->glBufferData(GL_ARRAY_BUFFER, rc->nverts * sizeof(NVGvertex), rc->verts, GL_STREAM_DRAW);
+
+        // Generate index data for triangle fan emulation
+        if (rc->nindices) {
+            QGL->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rc->indexBuffer);
+            QGL->glBufferData(GL_ELEMENT_ARRAY_BUFFER, rc->nindices * sizeof(uint32_t), rc->indices, GL_STREAM_DRAW);
+        }
     }
 }
 
@@ -1129,6 +1148,7 @@ static void glnvg__renderRender(void* uptr)
     QGL->glStencilFunc(GL_ALWAYS, 0, 0xffffffff);
 
     QGL->glBindBuffer(GL_ARRAY_BUFFER, rc->vertBuf);
+    QGL->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rc->indexBuffer);
     QGL->glEnableVertexAttribArray(0);
     QGL->glEnableVertexAttribArray(1);
     QGL->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(size_t)0);
@@ -1156,11 +1176,17 @@ static void glnvg__renderRender(void* uptr)
     rc->nuniforms = 0;
 }
 
-static int glnvg__maxVertCount(const NVGpath* paths, int npaths)
+static int glnvg__maxVertCount(const NVGpath* paths, int npaths, int *indexCount = nullptr)
 {
     int i, count = 0;
+    if (indexCount)
+        *indexCount = 0;
     for (i = 0; i < npaths; i++) {
-        count += paths[i].nfill;
+        if (paths[i].nfill > 2) {
+            count += paths[i].nfill;
+            if (indexCount)
+                *indexCount += (paths[i].nfill - 2) * 3;
+        }
         count += paths[i].nstroke;
     }
     return count;
@@ -1214,6 +1240,22 @@ static int glnvg__allocVerts(RhiNvgContext *rc, int n)
     return ret;
 }
 
+static int glnvg__allocIndices(RhiNvgContext *rc, int n)
+{
+    int ret = 0;
+    if (rc->nindices+n > rc->cindices) {
+        uint32_t *indices;
+        int cindices = std::max(rc->nindices + n, 4096) + rc->cindices/2; // 1.5x Overallocate
+        indices = (uint32_t*)realloc(rc->indices, sizeof(uint32_t) * cindices);
+        if (indices == NULL) return -1;
+        rc->indices = indices;
+        rc->cindices = cindices;
+    }
+    ret = rc->nindices;
+    rc->nindices += n;
+    return ret;
+}
+
 static int glnvg__allocFragUniforms(RhiNvgContext *rc, int n)
 {
     int ret = 0, structSize = rc->oneFragmentUniformBufferSize;
@@ -1250,7 +1292,8 @@ static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperation
     GLNVGcall* call = glnvg__allocCall(rc);
     NVGvertex* quad;
     GLNVGfragUniforms* frag;
-    int i, maxverts, offset;
+    int i, maxverts, offset, indexOffset, indexCount;
+    uint32_t *indexPtr;
 
     if (call == NULL) return;
 
@@ -1269,18 +1312,32 @@ static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperation
     }
 
     // Allocate vertices for all the paths.
-    maxverts = glnvg__maxVertCount(paths, npaths) + call->triangleCount;
+    maxverts = glnvg__maxVertCount(paths, npaths, &indexCount) + call->triangleCount;
     offset = glnvg__allocVerts(rc, maxverts);
     if (offset == -1) goto error;
+
+    indexOffset = glnvg__allocIndices(rc, indexCount);
+    if (indexOffset == -1) goto error;
+    call->indexOffset = indexOffset;
+    call->indexCount = indexCount;
+    indexPtr = &rc->indices[indexOffset];
 
     for (i = 0; i < npaths; i++) {
         GLNVGpath* copy = &rc->paths[call->pathOffset + i];
         const NVGpath* path = &paths[i];
         memset(copy, 0, sizeof(GLNVGpath));
-        if (path->nfill > 0) {
+        if (path->nfill > 2) {
             copy->fillOffset = offset;
             copy->fillCount = path->nfill;
             memcpy(&rc->verts[offset], path->fill, sizeof(NVGvertex) * path->nfill);
+
+            int baseVertexIndex = offset;
+            for (int j = 2; j < path->nfill; j++) {
+                *indexPtr++ = baseVertexIndex;
+                *indexPtr++ = baseVertexIndex + j - 1;
+                *indexPtr++ = baseVertexIndex + j;
+            }
+
             offset += path->nfill;
         }
         if (path->nstroke > 0) {
@@ -1434,6 +1491,9 @@ static void glnvg__renderDelete(void* uptr)
     if (rc->vertBuf != 0)
         QGL->glDeleteBuffers(1, &rc->vertBuf);
 
+    if (rc->indexBuffer != 0)
+        QGL->glDeleteBuffers(1, &rc->indexBuffer);
+
     for (i = 0; i < rc->ntextures; i++) {
         if (rc->textures[i].tex != 0 && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
             QGL->glDeleteTextures(1, &rc->textures[i].tex);
@@ -1442,6 +1502,9 @@ static void glnvg__renderDelete(void* uptr)
 
     delete rc->rhiVertexBuffer;
     rc->rhiVertexBuffer = nullptr;
+
+    delete rc->rhiIndexBuffer;
+    rc->rhiIndexBuffer = nullptr;
 
     delete rc->rhiVSUniformBuffer;
     rc->rhiVSUniformBuffer = nullptr;
@@ -1454,6 +1517,7 @@ static void glnvg__renderDelete(void* uptr)
 
     free(rc->paths);
     free(rc->verts);
+    free(rc->indices);
     free(rc->uniforms);
     free(rc->calls);
 

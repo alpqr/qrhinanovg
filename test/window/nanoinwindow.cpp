@@ -36,6 +36,143 @@ void cleanupTest()
     nvgDeleteRhi(vg);
 }
 
+void drawEyes(NVGcontext* vg, float x, float y, float w, float h, float mx, float my, float t)
+{
+    NVGpaint gloss, bg;
+    float ex = w *0.23f;
+    float ey = h * 0.5f;
+    float lx = x + ex;
+    float ly = y + ey;
+    float rx = x + w - ex;
+    float ry = y + ey;
+    float dx,dy,d;
+    float br = (ex < ey ? ex : ey) * 0.5f;
+    float blink = 1 - pow(sinf(t*0.5f),200)*0.8f;
+
+    bg = nvgLinearGradient(vg, x,y+h*0.5f,x+w*0.1f,y+h, nvgRGBA(0,0,0,32), nvgRGBA(0,0,0,16));
+    nvgBeginPath(vg);
+    nvgEllipse(vg, lx+3.0f,ly+16.0f, ex,ey);
+    nvgEllipse(vg, rx+3.0f,ry+16.0f, ex,ey);
+    nvgFillPaint(vg, bg);
+    nvgFill(vg);
+
+    bg = nvgLinearGradient(vg, x,y+h*0.25f,x+w*0.1f,y+h, nvgRGBA(220,220,220,255), nvgRGBA(128,128,128,255));
+    nvgBeginPath(vg);
+    nvgEllipse(vg, lx,ly, ex,ey);
+    nvgEllipse(vg, rx,ry, ex,ey);
+    nvgFillPaint(vg, bg);
+    nvgFill(vg);
+
+    dx = (mx - rx) / (ex * 10);
+    dy = (my - ry) / (ey * 10);
+    d = sqrtf(dx*dx+dy*dy);
+    if (d > 1.0f) {
+        dx /= d; dy /= d;
+    }
+    dx *= ex*0.4f;
+    dy *= ey*0.5f;
+    nvgBeginPath(vg);
+    nvgEllipse(vg, lx+dx,ly+dy+ey*0.25f*(1-blink), br,br*blink);
+    nvgFillColor(vg, nvgRGBA(32,32,32,255));
+    nvgFill(vg);
+
+    dx = (mx - rx) / (ex * 10);
+    dy = (my - ry) / (ey * 10);
+    d = sqrtf(dx*dx+dy*dy);
+    if (d > 1.0f) {
+        dx /= d; dy /= d;
+    }
+    dx *= ex*0.4f;
+    dy *= ey*0.5f;
+    nvgBeginPath(vg);
+    nvgEllipse(vg, rx+dx,ry+dy+ey*0.25f*(1-blink), br,br*blink);
+    nvgFillColor(vg, nvgRGBA(32,32,32,255));
+    nvgFill(vg);
+
+    gloss = nvgRadialGradient(vg, lx-ex*0.25f,ly-ey*0.5f, ex*0.1f,ex*0.75f, nvgRGBA(255,255,255,128), nvgRGBA(255,255,255,0));
+    nvgBeginPath(vg);
+    nvgEllipse(vg, lx,ly, ex,ey);
+    nvgFillPaint(vg, gloss);
+    nvgFill(vg);
+
+    gloss = nvgRadialGradient(vg, rx-ex*0.25f,ry-ey*0.5f, ex*0.1f,ex*0.75f, nvgRGBA(255,255,255,128), nvgRGBA(255,255,255,0));
+    nvgBeginPath(vg);
+    nvgEllipse(vg, rx,ry, ex,ey);
+    nvgFillPaint(vg, gloss);
+    nvgFill(vg);
+}
+
+void drawGraph(NVGcontext* vg, float x, float y, float w, float h, float t)
+{
+    NVGpaint bg;
+    float samples[6];
+    float sx[6], sy[6];
+    float dx = w/5.0f;
+    int i;
+
+    samples[0] = (1+sinf(t*1.2345f+cosf(t*0.33457f)*0.44f))*0.5f;
+    samples[1] = (1+sinf(t*0.68363f+cosf(t*1.3f)*1.55f))*0.5f;
+    samples[2] = (1+sinf(t*1.1642f+cosf(t*0.33457)*1.24f))*0.5f;
+    samples[3] = (1+sinf(t*0.56345f+cosf(t*1.63f)*0.14f))*0.5f;
+    samples[4] = (1+sinf(t*1.6245f+cosf(t*0.254f)*0.3f))*0.5f;
+    samples[5] = (1+sinf(t*0.345f+cosf(t*0.03f)*0.6f))*0.5f;
+
+    for (i = 0; i < 6; i++) {
+        sx[i] = x+i*dx;
+        sy[i] = y+h*samples[i]*0.8f;
+    }
+
+    // Graph background
+    bg = nvgLinearGradient(vg, x,y,x,y+h, nvgRGBA(0,160,192,0), nvgRGBA(0,160,192,64));
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, sx[0], sy[0]);
+    for (i = 1; i < 6; i++)
+        nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1], sx[i]-dx*0.5f,sy[i], sx[i],sy[i]);
+    nvgLineTo(vg, x+w, y+h);
+    nvgLineTo(vg, x, y+h);
+    nvgFillPaint(vg, bg);
+    nvgFill(vg);
+
+    // Graph line
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, sx[0], sy[0]+2);
+    for (i = 1; i < 6; i++)
+        nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1]+2, sx[i]-dx*0.5f,sy[i]+2, sx[i],sy[i]+2);
+    nvgStrokeColor(vg, nvgRGBA(0,0,0,32));
+    nvgStrokeWidth(vg, 3.0f);
+    nvgStroke(vg);
+
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, sx[0], sy[0]);
+    for (i = 1; i < 6; i++)
+        nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1], sx[i]-dx*0.5f,sy[i], sx[i],sy[i]);
+    nvgStrokeColor(vg, nvgRGBA(0,160,192,255));
+    nvgStrokeWidth(vg, 3.0f);
+    nvgStroke(vg);
+
+    // Graph sample pos
+    for (i = 0; i < 6; i++) {
+        bg = nvgRadialGradient(vg, sx[i],sy[i]+2, 3.0f,8.0f, nvgRGBA(0,0,0,32), nvgRGBA(0,0,0,0));
+        nvgBeginPath(vg);
+        nvgRect(vg, sx[i]-10, sy[i]-10+2, 20,20);
+        nvgFillPaint(vg, bg);
+        nvgFill(vg);
+    }
+
+    nvgBeginPath(vg);
+    for (i = 0; i < 6; i++)
+        nvgCircle(vg, sx[i], sy[i], 4.0f);
+    nvgFillColor(vg, nvgRGBA(0,160,192,255));
+    nvgFill(vg);
+    nvgBeginPath(vg);
+    for (i = 0; i < 6; i++)
+        nvgCircle(vg, sx[i], sy[i], 2.0f);
+    nvgFillColor(vg, nvgRGBA(220,220,220,255));
+    nvgFill(vg);
+
+    nvgStrokeWidth(vg, 1.0f);
+}
+
 // called on every frame outside the render pass
 void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
 {
@@ -50,6 +187,55 @@ void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
     nvgFontSize(vg, 36.0f);
     nvgFillColor(vg, nvgRGBA(220, 0, 220, 255));
     nvgText(vg, 10, 300, "hello world", nullptr);
+
+
+    float x = 300;
+    float y = 10;
+    float w = 500;
+    float h = 500;
+    float cornerRadius = 10.0;
+    // Window
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, x,y, w,h, cornerRadius);
+    nvgFillColor(vg, nvgRGBA(28,30,34,192));
+    //	nvgFillColor(vg, nvgRGBA(0,0,0,128));
+    nvgFill(vg);
+
+    // Drop shadow
+    NVGpaint  shadowPaint = nvgBoxGradient(vg, x,y+2, w,h, cornerRadius*2, 10, nvgRGBA(0,0,0,128), nvgRGBA(0,0,0,0));
+    nvgBeginPath(vg);
+    nvgRect(vg, x-10,y-10, w+20,h+30);
+    nvgRoundedRect(vg, x,y, w,h, cornerRadius);
+    nvgPathWinding(vg, NVG_HOLE);
+    nvgFillPaint(vg, shadowPaint);
+    nvgFill(vg);
+
+    // Header
+    NVGpaint  headerPaint = nvgLinearGradient(vg, x,y,x,y+15, nvgRGBA(255,255,255,8), nvgRGBA(0,0,0,16));
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, x+1,y+1, w-2,30, cornerRadius-1);
+    nvgFillPaint(vg, headerPaint);
+    nvgFill(vg);
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, x+0.5f, y+0.5f+30);
+    nvgLineTo(vg, x+0.5f+w-1, y+0.5f+30);
+    nvgStrokeColor(vg, nvgRGBA(0,0,0,32));
+    nvgStroke(vg);
+
+    nvgFontSize(vg, 15.0f);
+    nvgFontFace(vg, "font");
+    nvgTextAlign(vg,NVG_ALIGN_CENTER|NVG_ALIGN_MIDDLE);
+
+    nvgFontBlur(vg,2);
+    nvgFillColor(vg, nvgRGBA(0,0,0,128));
+    nvgText(vg, x+w/2,y+16+1, "title", NULL);
+
+    nvgFontBlur(vg,0);
+    nvgFillColor(vg, nvgRGBA(220,220,220,160));
+    nvgText(vg, x+w/2,y+16, "title", NULL);
+
+    drawEyes(vg, 600, 600, 120, 120, 500, 500, 1);
+    drawGraph(vg, 200, 500, 100, 100, 1.0);
 
     nvgEnd(vg);
 }
