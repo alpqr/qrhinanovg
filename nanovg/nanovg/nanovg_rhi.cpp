@@ -50,10 +50,10 @@ struct GLNVGtexture {
 
 struct GLNVGblend
 {
-    GLenum srcRGB;
-    GLenum dstRGB;
-    GLenum srcAlpha;
-    GLenum dstAlpha;
+    QRhiGraphicsPipeline::BlendFactor srcRGB;
+    QRhiGraphicsPipeline::BlendFactor dstRGB;
+    QRhiGraphicsPipeline::BlendFactor srcAlpha;
+    QRhiGraphicsPipeline::BlendFactor dstAlpha;
 };
 
 enum GLNVGcallType {
@@ -76,6 +76,8 @@ struct GLNVGcall {
     int fragmentUniformBufferOffset;
     int fragmentUniformBufferIndex;
     GLNVGblend blendFunc;
+    QRhiShaderResourceBindings *srb[2];
+    QRhiGraphicsPipeline *ps[4];
 };
 
 struct GLNVGpath {
@@ -125,7 +127,7 @@ struct PipelineState
 
     QRhiGraphicsPipeline::Topology topology = QRhiGraphicsPipeline::Triangles;
 
-    QRhiGraphicsPipeline::CullMode cullMode = QRhiGraphicsPipeline::None;
+    QRhiGraphicsPipeline::CullMode cullMode = QRhiGraphicsPipeline::Back;
 
     bool depthTestEnable = false;
     bool depthWriteEnable = false;
@@ -135,10 +137,10 @@ struct PipelineState
     bool usesStencilRef = false;
     QRhiGraphicsPipeline::StencilOpState stencilFront;
     QRhiGraphicsPipeline::StencilOpState stencilBack;
-    quint32 stencilReadMask = 0xFF;
-    quint32 stencilWriteMask = 0xFF;
+    quint32 stencilReadMask = 0xFFFFFFFF;
+    quint32 stencilWriteMask = 0xFFFFFFFF;
 
-    bool blendEnable = false;
+    bool blendEnable = true;
     QRhiGraphicsPipeline::TargetBlend targetBlend;
 
     int samples = 1;
@@ -154,12 +156,25 @@ inline bool operator==(const PipelineState &a, const PipelineState &b) Q_DECL_NO
            && a.depthFunc == b.depthFunc
            && a.stencilTestEnable == b.stencilTestEnable
            && a.usesStencilRef == b.usesStencilRef
-           && (std::memcmp(&a.stencilFront, &b.stencilFront, sizeof(QRhiGraphicsPipeline::StencilOpState)) == 0)
-           && (std::memcmp(&a.stencilBack, &b.stencilBack, sizeof(QRhiGraphicsPipeline::StencilOpState)) == 0)
+           && a.stencilFront.failOp == b.stencilFront.failOp
+           && a.stencilFront.depthFailOp == b.stencilFront.depthFailOp
+           && a.stencilFront.passOp == b.stencilFront.passOp
+           && a.stencilFront.compareOp == b.stencilFront.compareOp
+           && a.stencilBack.failOp == b.stencilBack.failOp
+           && a.stencilBack.depthFailOp == b.stencilBack.depthFailOp
+           && a.stencilBack.passOp == b.stencilBack.passOp
+           && a.stencilBack.compareOp == b.stencilBack.compareOp
            && a.stencilReadMask == b.stencilReadMask
            && a.stencilWriteMask == b.stencilWriteMask
            && a.blendEnable == b.blendEnable
-           && (std::memcmp(&a.targetBlend, &b.targetBlend, sizeof(QRhiGraphicsPipeline::TargetBlend)) == 0)
+           // NB! not memcmp
+           && a.targetBlend.colorWrite == b.targetBlend.colorWrite
+           && a.targetBlend.srcColor == b.targetBlend.srcColor
+           && a.targetBlend.dstColor == b.targetBlend.dstColor
+           && a.targetBlend.opColor == b.targetBlend.opColor
+           && a.targetBlend.srcAlpha == b.targetBlend.srcAlpha
+           && a.targetBlend.dstAlpha == b.targetBlend.dstAlpha
+           && a.targetBlend.opAlpha == b.targetBlend.opAlpha
            && a.samples == b.samples;
 }
 
@@ -300,6 +315,12 @@ struct RhiNvgContext
     QRhiBuffer *rhiVSUniformBuffer = nullptr;
     QRhiBuffer *rhiFSUniformBuffer = nullptr;
     QRhiResourceUpdateBatch *resourceUpdates = nullptr;
+    // The uniform buffers are the same for every draw call (the fragment
+    // uniform buffer uses dynamic offsets), only the QRhiTexture and Sampler
+    // can be different. The image flags (which defines the QRhiSampler) are
+    // static once an image_id is created, so a simple image_id -> srb mapping
+    // is possible.
+    QHash<int, QRhiShaderResourceBindings *> srbs;
 };
 
 static QRhiGraphicsPipeline *pipeline(RhiNvgContext *rc,
@@ -410,87 +431,24 @@ static void commitResourceUpdates(RhiNvgContext *rc)
     }
 }
 
-#define QGL QOpenGLContext::currentContext()->extraFunctions()
-
-static GLNVGtexture* glnvg__allocTexture(RhiNvgContext *rc)
+static GLNVGtexture *findTexture(RhiNvgContext *rc, int id)
 {
-    GLNVGtexture* tex = NULL;
-    int i;
-
-    for (i = 0; i < rc->ntextures; i++) {
-        if (rc->textures[i].id == 0) {
-            tex = &rc->textures[i];
-            break;
-        }
-    }
-    if (tex == NULL) {
-        if (rc->ntextures+1 > rc->ctextures) {
-            GLNVGtexture* textures;
-            int ctextures = std::max(rc->ntextures+1, 4) +  rc->ctextures/2; // 1.5x Overallocate
-            textures = (GLNVGtexture*)realloc(rc->textures, sizeof(GLNVGtexture)*ctextures);
-            if (textures == NULL) return NULL;
-            rc->textures = textures;
-            rc->ctextures = ctextures;
-        }
-        tex = &rc->textures[rc->ntextures++];
-    }
-
-    memset(tex, 0, sizeof(*tex));
-    tex->id = ++rc->textureId;
-
-    return tex;
-}
-
-static GLNVGtexture* glnvg__findTexture(RhiNvgContext *rc, int id)
-{
-    int i;
-    for (i = 0; i < rc->ntextures; i++)
+    for (int i = 0; i < rc->ntextures; i++) {
         if (rc->textures[i].id == id)
             return &rc->textures[i];
-    return NULL;
-}
-
-static int glnvg__deleteTexture(RhiNvgContext *rc, int id)
-{
-    int i;
-    for (i = 0; i < rc->ntextures; i++) {
-        if (rc->textures[i].id == id) {
-            if (rc->textures[i].tex != 0 && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
-                QGL->glDeleteTextures(1, &rc->textures[i].tex);
-            if (rc->textures[i].rhiTex && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
-                delete rc->textures[i].rhiTex;
-            memset(&rc->textures[i], 0, sizeof(rc->textures[i]));
-            return 1;
-        }
     }
-    return 0;
+    return nullptr;
 }
 
-static QRhiShaderResourceBindings *createSrb(RhiNvgContext *rc)
-{
-    QRhiShaderResourceBindings *srb = rc->rhi->newShaderResourceBindings();
-    srb->setBindings({
-        QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage, nullptr),
-        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, nullptr, sizeof(GLNVGfragUniforms)),
-        QRhiShaderResourceBinding::sampledTexture(2, QRhiShaderResourceBinding::FragmentStage, nullptr, nullptr)
-    });
-    if (!srb->create()) {
-        qWarning("Failed to create resource bindings (layout)");
-        delete srb;
-        return nullptr;
-    }
-    return srb;
-}
-
-static void updateTextureAndSamplerInSrb(RhiNvgContext *rc, QRhiShaderResourceBindings *srb, int image)
+static QRhiShaderResourceBindings *createSrb(RhiNvgContext *rc, int image)
 {
     GLNVGtexture* tex = NULL;
     if (image != 0) {
-        tex = glnvg__findTexture(rc, image);
+        tex = findTexture(rc, image);
     }
     // If no image is set, use empty texture
     if (tex == NULL) {
-        tex = glnvg__findTexture(rc, rc->dummyTex);
+        tex = findTexture(rc, rc->dummyTex);
     }
 
     if (tex && tex->rhiTex) {
@@ -501,14 +459,24 @@ static void updateTextureAndSamplerInSrb(RhiNvgContext *rc, QRhiShaderResourceBi
         samplerDesc.hTiling = (tex->flags & NVG_IMAGE_REPEATX) ? QRhiSampler::Repeat : QRhiSampler::ClampToEdge;
         samplerDesc.vTiling = (tex->flags & NVG_IMAGE_REPEATY) ? QRhiSampler::Repeat : QRhiSampler::ClampToEdge;
         samplerDesc.zTiling = QRhiSampler::Repeat;
+        QRhiShaderResourceBindings *srb = rc->rhi->newShaderResourceBindings();
         srb->setBindings({
             QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage, rc->rhiVSUniformBuffer),
             QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, rc->rhiFSUniformBuffer, sizeof(GLNVGfragUniforms)),
             QRhiShaderResourceBinding::sampledTexture(2, QRhiShaderResourceBinding::FragmentStage, tex->rhiTex, sampler(rc, samplerDesc))
         });
-        srb->updateResources(QRhiShaderResourceBindings::BindingsAreSorted);
+        if (!srb->create()) {
+            qWarning("Failed to create resource bindings");
+            delete srb;
+            return nullptr;
+        }
+        return srb;
     }
+
+    return nullptr;
 }
+
+#define QGL QOpenGLContext::currentContext()->extraFunctions()
 
 static void glnvg__dumpShaderError(GLuint shader, const char* name, const char* type)
 {
@@ -809,6 +777,8 @@ static int glnvg__renderCreate(void* uptr)
 static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int imageFlags, const unsigned char* data)
 {
     RhiNvgContext *rc = (RhiNvgContext*)uptr;
+    GLNVGtexture* tex = NULL;
+    int i;
 
     QRhiTexture::Format format = QRhiTexture::RGBA8;
     quint32 byteSize = w * h * 4;
@@ -828,9 +798,26 @@ static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int im
         return 0;
     }
 
-    GLNVGtexture* tex = glnvg__allocTexture(rc);
-
-    if (tex == NULL) return 0;
+    for (i = 0; i < rc->ntextures; i++) {
+        if (rc->textures[i].id == 0) {
+            tex = &rc->textures[i];
+            break;
+        }
+    }
+    if (tex == NULL) {
+        if (rc->ntextures+1 > rc->ctextures) {
+            GLNVGtexture* textures;
+            int ctextures = std::max(rc->ntextures+1, 4) +  rc->ctextures/2; // 1.5x Overallocate
+            textures = (GLNVGtexture*)realloc(rc->textures, sizeof(GLNVGtexture)*ctextures);
+            if (textures == NULL)
+                return 0;
+            rc->textures = textures;
+            rc->ctextures = ctextures;
+        }
+        tex = &rc->textures[rc->ntextures++];
+    }
+    memset(tex, 0, sizeof(*tex));
+    tex->id = ++rc->textureId;
 
     QGL->glGenTextures(1, &tex->tex);
 
@@ -902,19 +889,41 @@ static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int im
     return tex->id;
 }
 
-
 static int glnvg__renderDeleteTexture(void* uptr, int image)
 {
-    RhiNvgContext *rc = (RhiNvgContext*)uptr;
-    return glnvg__deleteTexture(rc, image);
+    RhiNvgContext *rc = (RhiNvgContext*)uptr;   
+    int i;
+    for (i = 0; i < rc->ntextures; i++) {
+        if (rc->textures[i].id == image) {
+            if (rc->textures[i].tex != 0 && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
+                QGL->glDeleteTextures(1, &rc->textures[i].tex);
+            if (rc->textures[i].rhiTex && (rc->textures[i].flags & NVG_IMAGE_NODELETE) == 0)
+                delete rc->textures[i].rhiTex;
+            memset(&rc->textures[i], 0, sizeof(rc->textures[i]));
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int glnvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w, int h, const unsigned char* data)
 {
     RhiNvgContext *rc = (RhiNvgContext*)uptr;
-    GLNVGtexture* tex = glnvg__findTexture(rc, image);
+    GLNVGtexture* tex = findTexture(rc, image);
 
     if (tex == NULL) return 0;
+
+    QRhiResourceUpdateBatch *u = resourceUpdateBatch(rc);
+    if (data) {
+        quint32 byteSize = w * h;
+        if (tex->type != NVG_TEXTURE_ALPHA)
+            byteSize *= 4;
+        QRhiTextureSubresourceUploadDescription image(data, byteSize);
+        image.setSourceSize(QSize(w, h));
+        image.setDestinationTopLeft(QPoint(x, y));
+        QRhiTextureUploadDescription desc({ 0, 0, image });
+        u->uploadTexture(tex->rhiTex, desc);
+    }
 
     QGL->glBindTexture(GL_TEXTURE_2D, tex->tex);
 
@@ -940,116 +949,11 @@ static int glnvg__renderUpdateTexture(void* uptr, int image, int x, int y, int w
 static int glnvg__renderGetTextureSize(void* uptr, int image, int* w, int* h)
 {
     RhiNvgContext *rc = (RhiNvgContext*)uptr;
-    GLNVGtexture* tex = glnvg__findTexture(rc, image);
+    GLNVGtexture* tex = findTexture(rc, image);
     if (tex == NULL) return 0;
     *w = tex->width;
     *h = tex->height;
     return 1;
-}
-
-static void glnvg__xformToMat3x4(float* m3, float* t)
-{
-    m3[0] = t[0];
-    m3[1] = t[1];
-    m3[2] = 0.0f;
-    m3[3] = 0.0f;
-    m3[4] = t[2];
-    m3[5] = t[3];
-    m3[6] = 0.0f;
-    m3[7] = 0.0f;
-    m3[8] = t[4];
-    m3[9] = t[5];
-    m3[10] = 1.0f;
-    m3[11] = 0.0f;
-}
-
-static NVGcolor glnvg__premulColor(NVGcolor c)
-{
-    c.r *= c.a;
-    c.g *= c.a;
-    c.b *= c.a;
-    return c;
-}
-
-static int glnvg__convertPaint(RhiNvgContext *rc, GLNVGfragUniforms* frag, NVGpaint* paint,
-                               NVGscissor* scissor, float width, float fringe, float strokeThr)
-{
-    GLNVGtexture* tex = NULL;
-    float invxform[6];
-
-    memset(frag, 0, sizeof(*frag));
-
-    frag->innerCol = glnvg__premulColor(paint->innerColor);
-    frag->outerCol = glnvg__premulColor(paint->outerColor);
-
-    if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
-        memset(frag->scissorMat, 0, sizeof(frag->scissorMat));
-        frag->scissorExt[0] = 1.0f;
-        frag->scissorExt[1] = 1.0f;
-        frag->scissorScale[0] = 1.0f;
-        frag->scissorScale[1] = 1.0f;
-    } else {
-        nvgTransformInverse(invxform, scissor->xform);
-        glnvg__xformToMat3x4(frag->scissorMat, invxform);
-        frag->scissorExt[0] = scissor->extent[0];
-        frag->scissorExt[1] = scissor->extent[1];
-        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
-        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
-    }
-
-    memcpy(frag->extent, paint->extent, sizeof(frag->extent));
-    frag->strokeMult = (width*0.5f + fringe*0.5f) / fringe;
-    frag->strokeThr = strokeThr;
-
-    if (paint->image != 0) {
-        tex = glnvg__findTexture(rc, paint->image);
-        if (tex == NULL) return 0;
-        if ((tex->flags & NVG_IMAGE_FLIPY) != 0) {
-            float m1[6], m2[6];
-            nvgTransformTranslate(m1, 0.0f, frag->extent[1] * 0.5f);
-            nvgTransformMultiply(m1, paint->xform);
-            nvgTransformScale(m2, 1.0f, -1.0f);
-            nvgTransformMultiply(m2, m1);
-            nvgTransformTranslate(m1, 0.0f, -frag->extent[1] * 0.5f);
-            nvgTransformMultiply(m1, m2);
-            nvgTransformInverse(invxform, m1);
-        } else {
-            nvgTransformInverse(invxform, paint->xform);
-        }
-        frag->type = NSVG_SHADER_FILLIMG;
-
-        if (tex->type == NVG_TEXTURE_RGBA)
-            frag->texType = (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1;
-        else
-            frag->texType = 2;
-    } else {
-        frag->type = NSVG_SHADER_FILLGRAD;
-        frag->radius = paint->radius;
-        frag->feather = paint->feather;
-        nvgTransformInverse(invxform, paint->xform);
-    }
-
-    glnvg__xformToMat3x4(frag->paintMat, invxform);
-
-    return 1;
-}
-
-static GLNVGfragUniforms* nvg__fragUniformPtr(RhiNvgContext *rc, int i);
-
-static void glnvg__setUniforms(RhiNvgContext *rc, int fragmentUniformBufferOffset, int image)
-{
-    GLNVGtexture* tex = NULL;
-    QGL->glBindBufferRange(GL_UNIFORM_BUFFER, 0, rc->vertexUniformBuffer, 0, 2 * sizeof(float));
-    QGL->glBindBufferRange(GL_UNIFORM_BUFFER, 1, rc->fragmentUniformBuffer, fragmentUniformBufferOffset, sizeof(GLNVGfragUniforms));
-
-    if (image != 0) {
-        tex = glnvg__findTexture(rc, image);
-    }
-    // If no image is set, use empty texture
-    if (tex == NULL) {
-        tex = glnvg__findTexture(rc, rc->dummyTex);
-    }
-    QGL->glBindTexture(GL_TEXTURE_2D, tex != NULL ? tex->tex : 0);
 }
 
 static void glnvg__renderViewport(void* uptr, float width, float height, float devicePixelRatio)
@@ -1060,250 +964,41 @@ static void glnvg__renderViewport(void* uptr, float width, float height, float d
     rc->view[1] = height;
 }
 
-static void glnvg__fill(RhiNvgContext *rc, GLNVGcall* call)
-{
-    GLNVGpath* paths = &rc->paths[call->pathOffset];
-    int i, npaths = call->pathCount;
-
-    // Draw shapes
-    QGL->glEnable(GL_STENCIL_TEST);
-    QGL->glStencilMask(0xff);
-    QGL->glStencilFunc(GL_ALWAYS, 0, 0xff);
-    QGL->glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-
-    QGL->glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
-    QGL->glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
-    QGL->glDisable(GL_CULL_FACE);
-
-    // set bindpoint for solid loc
-    glnvg__setUniforms(rc, call->fragmentUniformBufferOffset, 0);
-
-    if (call->indexCount)
-        QGL->glDrawElements(GL_TRIANGLES, call->indexCount, GL_UNSIGNED_INT, reinterpret_cast<const void *>(call->indexOffset * sizeof(quint32)));
-
-    QGL->glEnable(GL_CULL_FACE);
-
-    // Draw anti-aliased pixels
-    QGL->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-    glnvg__setUniforms(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize, call->image);
-
-    if (rc->flags & NVG_ANTIALIAS) {
-        QGL->glStencilFunc(GL_EQUAL, 0x00, 0xff);
-        QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-        // Draw fringes
-        for (i = 0; i < npaths; i++)
-            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
-    }
-
-    // Draw fill
-    QGL->glStencilFunc(GL_NOTEQUAL, 0x0, 0xff);
-    QGL->glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
-
-    QGL->glDrawArrays(GL_TRIANGLE_STRIP, call->triangleOffset, call->triangleCount);
-
-    QGL->glDisable(GL_STENCIL_TEST);
-}
-
-static void glnvg__convexFill(RhiNvgContext *rc, GLNVGcall* call)
-{
-    GLNVGpath* paths = &rc->paths[call->pathOffset];
-    int i, npaths = call->pathCount;
-
-    glnvg__setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
-
-    if (call->indexCount)
-        QGL->glDrawElements(GL_TRIANGLES, call->indexCount, GL_UNSIGNED_INT, reinterpret_cast<const void *>(call->indexOffset * sizeof(quint32)));
-
-    // Draw fringes
-    for (i = 0; i < npaths; i++) {
-        if (paths[i].strokeCount > 0) {
-            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
-        }
-    }
-}
-
-static void glnvg__stroke(RhiNvgContext *rc, GLNVGcall* call)
-{
-    GLNVGpath* paths = &rc->paths[call->pathOffset];
-    int npaths = call->pathCount, i;
-
-    if (rc->flags & NVG_STENCIL_STROKES) {
-
-        QGL->glEnable(GL_STENCIL_TEST);
-        QGL->glStencilMask(0xff);
-
-        // Fill the stroke base without overlap
-        QGL->glStencilFunc(GL_EQUAL, 0x0, 0xff);
-        QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
-
-        glnvg__setUniforms(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize, call->image);
-
-        for (i = 0; i < npaths; i++)
-            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
-
-        // Draw anti-aliased pixels.
-        glnvg__setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
-
-        QGL->glStencilFunc(GL_EQUAL, 0x00, 0xff);
-        QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-
-        for (i = 0; i < npaths; i++)
-            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
-
-        // Clear stencil buffer.
-        QGL->glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-        QGL->glStencilFunc(GL_ALWAYS, 0x0, 0xff);
-        QGL->glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
-
-        for (i = 0; i < npaths; i++)
-            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
-
-        QGL->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-        QGL->glDisable(GL_STENCIL_TEST);
-
-    } else {
-        glnvg__setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
-
-        // Draw Strokes
-        for (i = 0; i < npaths; i++)
-            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
-    }
-}
-
-static void glnvg__triangles(RhiNvgContext *rc, GLNVGcall* call)
-{
-    glnvg__setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
-    QGL->glDrawArrays(GL_TRIANGLES, call->triangleOffset, call->triangleCount);
-}
-
-static GLenum glnvg_convertBlendFuncFactor(int factor)
+inline QRhiGraphicsPipeline::BlendFactor glnvg_convertBlendFuncFactor(int factor)
 {
     if (factor == NVG_ZERO)
-        return GL_ZERO;
+        return QRhiGraphicsPipeline::Zero;
     if (factor == NVG_ONE)
-        return GL_ONE;
+        return QRhiGraphicsPipeline::One;
     if (factor == NVG_SRC_COLOR)
-        return GL_SRC_COLOR;
+        return QRhiGraphicsPipeline::SrcColor;
     if (factor == NVG_ONE_MINUS_SRC_COLOR)
-        return GL_ONE_MINUS_SRC_COLOR;
+        return QRhiGraphicsPipeline::OneMinusSrcColor;
     if (factor == NVG_DST_COLOR)
-        return GL_DST_COLOR;
+        return QRhiGraphicsPipeline::DstColor;
     if (factor == NVG_ONE_MINUS_DST_COLOR)
-        return GL_ONE_MINUS_DST_COLOR;
+        return QRhiGraphicsPipeline::OneMinusDstColor;
     if (factor == NVG_SRC_ALPHA)
-        return GL_SRC_ALPHA;
+        return QRhiGraphicsPipeline::SrcAlpha;
     if (factor == NVG_ONE_MINUS_SRC_ALPHA)
-        return GL_ONE_MINUS_SRC_ALPHA;
+        return QRhiGraphicsPipeline::OneMinusSrcAlpha;
     if (factor == NVG_DST_ALPHA)
-        return GL_DST_ALPHA;
+        return QRhiGraphicsPipeline::DstAlpha;
     if (factor == NVG_ONE_MINUS_DST_ALPHA)
-        return GL_ONE_MINUS_DST_ALPHA;
+        return QRhiGraphicsPipeline::OneMinusDstAlpha;
     if (factor == NVG_SRC_ALPHA_SATURATE)
-        return GL_SRC_ALPHA_SATURATE;
-    return GL_INVALID_ENUM;
+        return QRhiGraphicsPipeline::SrcAlphaSaturate;
+    return QRhiGraphicsPipeline::One;
 }
 
-static GLNVGblend glnvg__blendCompositeOperation(NVGcompositeOperationState op)
+inline GLNVGblend glnvg__blendCompositeOperation(NVGcompositeOperationState op)
 {
     GLNVGblend blend;
     blend.srcRGB = glnvg_convertBlendFuncFactor(op.srcRGB);
     blend.dstRGB = glnvg_convertBlendFuncFactor(op.dstRGB);
     blend.srcAlpha = glnvg_convertBlendFuncFactor(op.srcAlpha);
     blend.dstAlpha = glnvg_convertBlendFuncFactor(op.dstAlpha);
-    if (blend.srcRGB == GL_INVALID_ENUM || blend.dstRGB == GL_INVALID_ENUM || blend.srcAlpha == GL_INVALID_ENUM || blend.dstAlpha == GL_INVALID_ENUM)
-    {
-        blend.srcRGB = GL_ONE;
-        blend.dstRGB = GL_ONE_MINUS_SRC_ALPHA;
-        blend.srcAlpha = GL_ONE;
-        blend.dstAlpha = GL_ONE_MINUS_SRC_ALPHA;
-    }
     return blend;
-}
-
-static void glnvg__renderEndPrepare(void* uptr)
-{
-    RhiNvgContext *rc = (RhiNvgContext*)uptr;
-
-    if (rc->ncalls > 0) {
-        ensureBufferCapacity(&rc->rhiVSUniformBuffer, 2 * sizeof(float));
-        ensureBufferCapacity(&rc->rhiFSUniformBuffer, rc->nuniforms * rc->oneFragmentUniformBufferSize);
-        ensureBufferCapacity(&rc->rhiVertexBuffer, rc->nverts * sizeof(NVGvertex));
-        ensureBufferCapacity(&rc->rhiIndexBuffer, rc->nindices * sizeof(uint32_t));
-
-        QRhiResourceUpdateBatch *u = resourceUpdateBatch(rc);
-        u->updateDynamicBuffer(rc->rhiVSUniformBuffer, 0, 2 * sizeof(float), rc->view);
-        u->updateDynamicBuffer(rc->rhiFSUniformBuffer, 0, rc->nuniforms * rc->oneFragmentUniformBufferSize, rc->uniforms);
-        u->uploadStaticBuffer(rc->rhiVertexBuffer, 0, rc->nverts * sizeof(NVGvertex), rc->verts);
-        if (rc->nindices)
-            u->uploadStaticBuffer(rc->rhiIndexBuffer, 0, rc->nindices * sizeof(uint32_t), rc->indices);
-
-        commitResourceUpdates(rc);
-
-        // Upload ubo for frag shaders
-        QGL->glBindBuffer(GL_UNIFORM_BUFFER, rc->fragmentUniformBuffer);
-        QGL->glBufferData(GL_UNIFORM_BUFFER, rc->nuniforms * rc->oneFragmentUniformBufferSize, rc->uniforms, GL_STREAM_DRAW);
-
-        // For vertex
-        QGL->glBindBuffer(GL_UNIFORM_BUFFER, rc->vertexUniformBuffer);
-        QGL->glBufferData(GL_UNIFORM_BUFFER, 2 * sizeof(float), rc->view, GL_STREAM_DRAW);
-
-        // Upload vertex data
-        QGL->glBindBuffer(GL_ARRAY_BUFFER, rc->vertBuf);
-        QGL->glBufferData(GL_ARRAY_BUFFER, rc->nverts * sizeof(NVGvertex), rc->verts, GL_STREAM_DRAW);
-
-        // Generate index data for triangle fan emulation
-        if (rc->nindices) {
-            QGL->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rc->indexBuffer);
-            QGL->glBufferData(GL_ELEMENT_ARRAY_BUFFER, rc->nindices * sizeof(uint32_t), rc->indices, GL_STREAM_DRAW);
-        }
-    }
-}
-
-static void glnvg__renderRender(void* uptr)
-{
-    RhiNvgContext *rc = (RhiNvgContext*)uptr;
-
-    QGL->glUseProgram(rc->prog);
-    QGL->glEnable(GL_CULL_FACE);
-    QGL->glCullFace(GL_BACK);
-    QGL->glFrontFace(GL_CCW);
-    QGL->glEnable(GL_BLEND);
-    QGL->glDisable(GL_DEPTH_TEST);
-    QGL->glDisable(GL_SCISSOR_TEST);
-    QGL->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    QGL->glStencilMask(0xffffffff);
-    QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-    QGL->glStencilFunc(GL_ALWAYS, 0, 0xffffffff);
-
-    QGL->glBindBuffer(GL_ARRAY_BUFFER, rc->vertBuf);
-    QGL->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rc->indexBuffer);
-    QGL->glEnableVertexAttribArray(0);
-    QGL->glEnableVertexAttribArray(1);
-    QGL->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(size_t)0);
-    QGL->glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(0 + 2*sizeof(float)));
-
-    QGL->glUniform1i(rc->texLoc, 0);
-
-    for (int i = 0; i < rc->ncalls; i++) {
-        GLNVGcall* call = &rc->calls[i];
-        QGL->glBlendFuncSeparate(call->blendFunc.srcRGB, call->blendFunc.dstRGB, call->blendFunc.srcAlpha, call->blendFunc.dstAlpha);
-        if (call->type == GLNVG_FILL)
-            glnvg__fill(rc, call);
-        else if (call->type == GLNVG_CONVEXFILL)
-            glnvg__convexFill(rc, call);
-        else if (call->type == GLNVG_STROKE)
-            glnvg__stroke(rc, call);
-        else if (call->type == GLNVG_TRIANGLES)
-            glnvg__triangles(rc, call);
-    }
-
-    // Reset calls
-    rc->nverts = 0;
-    rc->npaths = 0;
-    rc->ncalls = 0;
-    rc->nuniforms = 0;
 }
 
 static int glnvg__maxVertCount(const NVGpath* paths, int npaths, int *indexCount = nullptr)
@@ -1402,17 +1097,104 @@ static int glnvg__allocFragUniforms(RhiNvgContext *rc, int n)
     return ret;
 }
 
-static GLNVGfragUniforms* nvg__fragUniformPtr(RhiNvgContext *rc, int i)
+inline GLNVGfragUniforms* nvg__fragUniformPtr(RhiNvgContext *rc, int i)
 {
     return (GLNVGfragUniforms*)&rc->uniforms[i];
 }
 
-static void glnvg__vset(NVGvertex* vtx, float x, float y, float u, float v)
+inline void glnvg__vset(NVGvertex* vtx, float x, float y, float u, float v)
 {
     vtx->x = x;
     vtx->y = y;
     vtx->u = u;
     vtx->v = v;
+}
+
+inline void glnvg__xformToMat3x4(float* m3, float* t)
+{
+    m3[0] = t[0];
+    m3[1] = t[1];
+    m3[2] = 0.0f;
+    m3[3] = 0.0f;
+    m3[4] = t[2];
+    m3[5] = t[3];
+    m3[6] = 0.0f;
+    m3[7] = 0.0f;
+    m3[8] = t[4];
+    m3[9] = t[5];
+    m3[10] = 1.0f;
+    m3[11] = 0.0f;
+}
+
+inline NVGcolor glnvg__premulColor(NVGcolor c)
+{
+    c.r *= c.a;
+    c.g *= c.a;
+    c.b *= c.a;
+    return c;
+}
+
+static int glnvg__convertPaint(RhiNvgContext *rc, GLNVGfragUniforms* frag, NVGpaint* paint,
+                               NVGscissor* scissor, float width, float fringe, float strokeThr)
+{
+    GLNVGtexture* tex = NULL;
+    float invxform[6];
+
+    memset(frag, 0, sizeof(*frag));
+
+    frag->innerCol = glnvg__premulColor(paint->innerColor);
+    frag->outerCol = glnvg__premulColor(paint->outerColor);
+
+    if (scissor->extent[0] < -0.5f || scissor->extent[1] < -0.5f) {
+        memset(frag->scissorMat, 0, sizeof(frag->scissorMat));
+        frag->scissorExt[0] = 1.0f;
+        frag->scissorExt[1] = 1.0f;
+        frag->scissorScale[0] = 1.0f;
+        frag->scissorScale[1] = 1.0f;
+    } else {
+        nvgTransformInverse(invxform, scissor->xform);
+        glnvg__xformToMat3x4(frag->scissorMat, invxform);
+        frag->scissorExt[0] = scissor->extent[0];
+        frag->scissorExt[1] = scissor->extent[1];
+        frag->scissorScale[0] = sqrtf(scissor->xform[0]*scissor->xform[0] + scissor->xform[2]*scissor->xform[2]) / fringe;
+        frag->scissorScale[1] = sqrtf(scissor->xform[1]*scissor->xform[1] + scissor->xform[3]*scissor->xform[3]) / fringe;
+    }
+
+    memcpy(frag->extent, paint->extent, sizeof(frag->extent));
+    frag->strokeMult = (width*0.5f + fringe*0.5f) / fringe;
+    frag->strokeThr = strokeThr;
+
+    if (paint->image != 0) {
+        tex = findTexture(rc, paint->image);
+        if (tex == NULL) return 0;
+        if ((tex->flags & NVG_IMAGE_FLIPY) != 0) {
+            float m1[6], m2[6];
+            nvgTransformTranslate(m1, 0.0f, frag->extent[1] * 0.5f);
+            nvgTransformMultiply(m1, paint->xform);
+            nvgTransformScale(m2, 1.0f, -1.0f);
+            nvgTransformMultiply(m2, m1);
+            nvgTransformTranslate(m1, 0.0f, -frag->extent[1] * 0.5f);
+            nvgTransformMultiply(m1, m2);
+            nvgTransformInverse(invxform, m1);
+        } else {
+            nvgTransformInverse(invxform, paint->xform);
+        }
+        frag->type = NSVG_SHADER_FILLIMG;
+
+        if (tex->type == NVG_TEXTURE_RGBA)
+            frag->texType = (tex->flags & NVG_IMAGE_PREMULTIPLIED) ? 0 : 1;
+        else
+            frag->texType = 2;
+    } else {
+        frag->type = NSVG_SHADER_FILLGRAD;
+        frag->radius = paint->radius;
+        frag->feather = paint->feather;
+        nvgTransformInverse(invxform, paint->xform);
+    }
+
+    glnvg__xformToMat3x4(frag->paintMat, invxform);
+
+    return 1;
 }
 
 static void glnvg__renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe,
@@ -1603,6 +1385,371 @@ error:
     if (rc->ncalls > 0) rc->ncalls--;
 }
 
+static void glnvg__renderEndPrepare(void* uptr)
+{
+    RhiNvgContext *rc = (RhiNvgContext*)uptr;
+
+    if (rc->ncalls > 0) {
+        ensureBufferCapacity(&rc->rhiVSUniformBuffer, 2 * sizeof(float));
+        ensureBufferCapacity(&rc->rhiFSUniformBuffer, rc->nuniforms * rc->oneFragmentUniformBufferSize);
+        ensureBufferCapacity(&rc->rhiVertexBuffer, rc->nverts * sizeof(NVGvertex));
+        ensureBufferCapacity(&rc->rhiIndexBuffer, rc->nindices * sizeof(uint32_t));
+
+        QRhiResourceUpdateBatch *u = resourceUpdateBatch(rc);
+        u->updateDynamicBuffer(rc->rhiVSUniformBuffer, 0, 2 * sizeof(float), rc->view);
+        u->updateDynamicBuffer(rc->rhiFSUniformBuffer, 0, rc->nuniforms * rc->oneFragmentUniformBufferSize, rc->uniforms);
+        u->uploadStaticBuffer(rc->rhiVertexBuffer, 0, rc->nverts * sizeof(NVGvertex), rc->verts);
+        if (rc->nindices)
+            u->uploadStaticBuffer(rc->rhiIndexBuffer, 0, rc->nindices * sizeof(uint32_t), rc->indices);
+
+        commitResourceUpdates(rc);
+
+        const int dummyTexId = findTexture(rc, rc->dummyTex)->id;
+        QRhiShaderResourceBindings *&srbWithDummyTexture(rc->srbs[dummyTexId]);
+        if (!srbWithDummyTexture)
+            srbWithDummyTexture = createSrb(rc, dummyTexId);
+
+        for (int i = 0; i < rc->ncalls; i++) {
+            GLNVGcall *call = &rc->calls[i];
+            QRhiRenderPassDescriptor *rpDesc = rc->rt->renderPassDescriptor();
+
+            QRhiShaderResourceBindings *&srbWithCallTexture(rc->srbs[call->image]);
+            if (!srbWithCallTexture)
+                srbWithCallTexture = createSrb(rc, call->image);
+
+            PipelineState basePs;
+            basePs.edgeAA = (rc->flags & NVG_ANTIALIAS) != 0;
+            basePs.targetBlend.srcColor = call->blendFunc.srcRGB;
+            basePs.targetBlend.dstColor = call->blendFunc.dstRGB;
+            basePs.targetBlend.srcAlpha = call->blendFunc.srcAlpha;
+            basePs.targetBlend.dstAlpha = call->blendFunc.dstAlpha;
+
+            if (call->type == GLNVG_FILL) {
+                call->srb[0] = srbWithDummyTexture;
+                call->srb[1] = srbWithCallTexture;
+
+                // 1. Draw shapes
+                PipelineState ps = basePs;
+                ps.stencilTestEnable = true;
+                ps.stencilWriteMask = 0xFF;
+                ps.stencilReadMask = 0xFF;
+                ps.stencilFront = {
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::IncrementAndWrap,
+                    QRhiGraphicsPipeline::Always
+                };
+                ps.stencilBack = {
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::DecrementAndWrap,
+                    QRhiGraphicsPipeline::Always
+                };
+                ps.cullMode = QRhiGraphicsPipeline::None;
+                ps.targetBlend.colorWrite = {};
+
+                call->ps[0] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+
+                // 2. Draw anti-aliased pixels
+                ps.cullMode = QRhiGraphicsPipeline::Back;
+                ps.targetBlend.colorWrite = QRhiGraphicsPipeline::ColorMask(0xF);
+                ps.stencilFront = {
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Equal
+                };
+                ps.stencilBack = ps.stencilFront;
+
+                ps.topology = QRhiGraphicsPipeline::TriangleStrip;
+
+                call->ps[1] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[1]), rpDesc, call->srb[1]);
+
+                // 3. Draw fill
+                ps.stencilFront = {
+                    QRhiGraphicsPipeline::StencilZero,
+                    QRhiGraphicsPipeline::StencilZero,
+                    QRhiGraphicsPipeline::StencilZero,
+                    QRhiGraphicsPipeline::NotEqual
+                };
+                ps.stencilBack = ps.stencilFront;
+
+                call->ps[2] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[1]), rpDesc, call->srb[1]);
+            } else if (call->type == GLNVG_CONVEXFILL) {
+                call->srb[0] = srbWithCallTexture;
+
+                // 1.
+                call->ps[0] = pipeline(rc, PipelineStateKey::create(basePs, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+
+                // 2. Draw fringes
+                PipelineState ps = basePs;
+                ps.topology = QRhiGraphicsPipeline::TriangleStrip;
+                call->ps[1] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+            } else if (call->type == GLNVG_STROKE) {
+                call->srb[0] = srbWithCallTexture;
+
+                // 1. Draw Strokes (no stencil)
+                PipelineState ps = basePs;
+                ps.topology = QRhiGraphicsPipeline::TriangleStrip;
+                call->ps[0] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+
+                // 2. Fill the stroke base without overlap
+                ps.stencilTestEnable = true;
+                ps.stencilWriteMask = 0xFF;
+                ps.stencilReadMask = 0xFF;
+                ps.stencilFront = {
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::IncrementAndClamp,
+                    QRhiGraphicsPipeline::Equal
+                };
+                ps.stencilBack = ps.stencilFront;
+
+                call->ps[1] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+
+                // 3. Draw anti-aliased pixels.
+                ps.stencilFront = {
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Keep,
+                    QRhiGraphicsPipeline::Equal
+                };
+                ps.stencilBack = ps.stencilFront;
+
+                call->ps[2] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+
+                // 4. Clear stencil buffer
+                ps.targetBlend.colorWrite = {};
+                ps.stencilFront = {
+                    QRhiGraphicsPipeline::StencilZero,
+                    QRhiGraphicsPipeline::StencilZero,
+                    QRhiGraphicsPipeline::StencilZero,
+                    QRhiGraphicsPipeline::Always
+                };
+                ps.stencilBack = ps.stencilFront;
+
+                call->ps[3] = pipeline(rc, PipelineStateKey::create(ps, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+            } else if (call->type == GLNVG_TRIANGLES) {
+                call->srb[0] = srbWithCallTexture;
+
+                // 1.
+                call->ps[0] = pipeline(rc, PipelineStateKey::create(basePs, rpDesc, call->srb[0]), rpDesc, call->srb[0]);
+            }
+        }
+
+
+
+        // Upload ubo for frag shaders
+        QGL->glBindBuffer(GL_UNIFORM_BUFFER, rc->fragmentUniformBuffer);
+        QGL->glBufferData(GL_UNIFORM_BUFFER, rc->nuniforms * rc->oneFragmentUniformBufferSize, rc->uniforms, GL_STREAM_DRAW);
+
+        // For vertex
+        QGL->glBindBuffer(GL_UNIFORM_BUFFER, rc->vertexUniformBuffer);
+        QGL->glBufferData(GL_UNIFORM_BUFFER, 2 * sizeof(float), rc->view, GL_STREAM_DRAW);
+
+        // Upload vertex data
+        QGL->glBindBuffer(GL_ARRAY_BUFFER, rc->vertBuf);
+        QGL->glBufferData(GL_ARRAY_BUFFER, rc->nverts * sizeof(NVGvertex), rc->verts, GL_STREAM_DRAW);
+
+        // Generate index data for triangle fan emulation
+        if (rc->nindices) {
+            QGL->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rc->indexBuffer);
+            QGL->glBufferData(GL_ELEMENT_ARRAY_BUFFER, rc->nindices * sizeof(uint32_t), rc->indices, GL_STREAM_DRAW);
+        }
+    }
+
+    qDebug() << rc->pipelines.count() << rc->srbs.count();
+
+}
+
+
+
+// ********** render phase stuff (that is called after the command buffer has started to record a render pass)
+
+static void renderpass_setUniforms(RhiNvgContext *rc, int fragmentUniformBufferOffset, int image)
+{
+    GLNVGtexture* tex = NULL;
+    QGL->glBindBufferRange(GL_UNIFORM_BUFFER, 0, rc->vertexUniformBuffer, 0, 2 * sizeof(float));
+    QGL->glBindBufferRange(GL_UNIFORM_BUFFER, 1, rc->fragmentUniformBuffer, fragmentUniformBufferOffset, sizeof(GLNVGfragUniforms));
+
+    if (image != 0) {
+        tex = findTexture(rc, image);
+    }
+    // If no image is set, use empty texture
+    if (tex == NULL) {
+        tex = findTexture(rc, rc->dummyTex);
+    }
+    QGL->glBindTexture(GL_TEXTURE_2D, tex != NULL ? tex->tex : 0);
+}
+
+static void renderpass_fill(RhiNvgContext *rc, GLNVGcall* call)
+{
+    GLNVGpath* paths = &rc->paths[call->pathOffset];
+    int i, npaths = call->pathCount;
+
+    // Draw shapes
+    QGL->glEnable(GL_STENCIL_TEST);
+    QGL->glStencilMask(0xff);
+    QGL->glStencilFunc(GL_ALWAYS, 0, 0xff);
+    QGL->glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+    QGL->glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
+    QGL->glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
+    QGL->glDisable(GL_CULL_FACE);
+
+    // set bindpoint for solid loc
+    renderpass_setUniforms(rc, call->fragmentUniformBufferOffset, 0);
+
+    if (call->indexCount)
+        QGL->glDrawElements(GL_TRIANGLES, call->indexCount, GL_UNSIGNED_INT, reinterpret_cast<const void *>(call->indexOffset * sizeof(quint32)));
+
+    QGL->glEnable(GL_CULL_FACE);
+
+    // Draw anti-aliased pixels
+    QGL->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    renderpass_setUniforms(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize, call->image);
+
+    if (rc->flags & NVG_ANTIALIAS) {
+        QGL->glStencilFunc(GL_EQUAL, 0x00, 0xff);
+        QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        // Draw fringes
+        for (i = 0; i < npaths; i++)
+            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
+    }
+
+    // Draw fill
+    QGL->glStencilFunc(GL_NOTEQUAL, 0x0, 0xff);
+    QGL->glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
+
+    QGL->glDrawArrays(GL_TRIANGLE_STRIP, call->triangleOffset, call->triangleCount);
+
+    QGL->glDisable(GL_STENCIL_TEST);
+}
+
+static void renderpass_convexFill(RhiNvgContext *rc, GLNVGcall* call)
+{
+    GLNVGpath* paths = &rc->paths[call->pathOffset];
+    int i, npaths = call->pathCount;
+
+    renderpass_setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
+
+    if (call->indexCount)
+        QGL->glDrawElements(GL_TRIANGLES, call->indexCount, GL_UNSIGNED_INT, reinterpret_cast<const void *>(call->indexOffset * sizeof(quint32)));
+
+    // Draw fringes
+    for (i = 0; i < npaths; i++) {
+        if (paths[i].strokeCount > 0) {
+            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
+        }
+    }
+}
+
+static void renderpass_stroke(RhiNvgContext *rc, GLNVGcall* call)
+{
+    GLNVGpath* paths = &rc->paths[call->pathOffset];
+    int npaths = call->pathCount, i;
+
+    if (rc->flags & NVG_STENCIL_STROKES) {
+
+        QGL->glEnable(GL_STENCIL_TEST);
+        QGL->glStencilMask(0xff);
+
+        // Fill the stroke base without overlap
+        QGL->glStencilFunc(GL_EQUAL, 0x0, 0xff);
+        QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_INCR);
+
+        renderpass_setUniforms(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize, call->image);
+
+        for (i = 0; i < npaths; i++)
+            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
+
+        // Draw anti-aliased pixels.
+        renderpass_setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
+
+        QGL->glStencilFunc(GL_EQUAL, 0x00, 0xff);
+        QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+        for (i = 0; i < npaths; i++)
+            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
+
+        // Clear stencil buffer.
+        QGL->glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        QGL->glStencilFunc(GL_ALWAYS, 0x0, 0xff);
+        QGL->glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
+
+        for (i = 0; i < npaths; i++)
+            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
+
+        QGL->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+        QGL->glDisable(GL_STENCIL_TEST);
+
+    } else {
+        renderpass_setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
+
+        // Draw Strokes
+        for (i = 0; i < npaths; i++)
+            QGL->glDrawArrays(GL_TRIANGLE_STRIP, paths[i].strokeOffset, paths[i].strokeCount);
+    }
+}
+
+static void renderpass_triangles(RhiNvgContext *rc, GLNVGcall* call)
+{
+    renderpass_setUniforms(rc, call->fragmentUniformBufferOffset, call->image);
+    QGL->glDrawArrays(GL_TRIANGLES, call->triangleOffset, call->triangleCount);
+}
+
+static void renderpass_render(void* uptr)
+{
+    RhiNvgContext *rc = (RhiNvgContext*)uptr;
+
+    QGL->glUseProgram(rc->prog);
+    QGL->glEnable(GL_CULL_FACE);
+    QGL->glCullFace(GL_BACK);
+    QGL->glFrontFace(GL_CCW);
+    QGL->glEnable(GL_BLEND);
+    QGL->glDisable(GL_DEPTH_TEST);
+    QGL->glDisable(GL_SCISSOR_TEST);
+    QGL->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    QGL->glStencilMask(0xffffffff);
+    QGL->glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    QGL->glStencilFunc(GL_ALWAYS, 0, 0xffffffff);
+
+    QGL->glBindBuffer(GL_ARRAY_BUFFER, rc->vertBuf);
+    QGL->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rc->indexBuffer);
+    QGL->glEnableVertexAttribArray(0);
+    QGL->glEnableVertexAttribArray(1);
+    QGL->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(size_t)0);
+    QGL->glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(NVGvertex), (const GLvoid*)(0 + 2*sizeof(float)));
+
+    QGL->glUniform1i(rc->texLoc, 0);
+
+    for (int i = 0; i < rc->ncalls; i++) {
+        GLNVGcall* call = &rc->calls[i];
+        // no mapping to GL anymore, the standard premul alpha blend works because of the test app setting it on the context earlier
+        //QGL->glBlendFuncSeparate(call->blendFunc.srcRGB, call->blendFunc.dstRGB, call->blendFunc.srcAlpha, call->blendFunc.dstAlpha);
+        if (call->type == GLNVG_FILL)
+            renderpass_fill(rc, call);
+        else if (call->type == GLNVG_CONVEXFILL)
+            renderpass_convexFill(rc, call);
+        else if (call->type == GLNVG_STROKE)
+            renderpass_stroke(rc, call);
+        else if (call->type == GLNVG_TRIANGLES)
+            renderpass_triangles(rc, call);
+    }
+
+    // Reset calls
+    rc->nverts = 0;
+    rc->npaths = 0;
+    rc->ncalls = 0;
+    rc->nuniforms = 0;
+}
+
+// ********** end of render pass stuff
+
+
+
 static void glnvg__renderDelete(void* uptr)
 {
     RhiNvgContext *rc = (RhiNvgContext*)uptr;
@@ -1632,17 +1779,17 @@ static void glnvg__renderDelete(void* uptr)
     }
     free(rc->textures);
 
+    for (const auto &samplerInfo : std::as_const(rc->samplers))
+        delete samplerInfo.second;
+
+    qDeleteAll(rc->pipelines);
+
+    qDeleteAll(rc->srbs);
+
     delete rc->rhiVertexBuffer;
-    rc->rhiVertexBuffer = nullptr;
-
     delete rc->rhiIndexBuffer;
-    rc->rhiIndexBuffer = nullptr;
-
     delete rc->rhiVSUniformBuffer;
-    rc->rhiVSUniformBuffer = nullptr;
-
     delete rc->rhiFSUniformBuffer;
-    rc->rhiFSUniformBuffer = nullptr;
 
     free(rc->paths);
     free(rc->verts);
@@ -1672,7 +1819,7 @@ NVGcontext* nvgCreateRhi(QRhi *rhi, int flags)
     params.renderTriangles = glnvg__renderTriangles;
     params.renderDelete = glnvg__renderDelete;
     params.renderEndPrepare = glnvg__renderEndPrepare;
-    params.renderRender = glnvg__renderRender;
+    params.renderRender = renderpass_render;
     params.userPtr = rc;
     params.edgeAntiAlias = flags & NVG_ANTIALIAS ? 1 : 0;
 
@@ -1692,11 +1839,6 @@ error:
 
 void nvgDeleteRhi(NVGcontext* ctx)
 {
-    RhiNvgContext *rc = (RhiNvgContext*) nvgInternalParams(ctx)->userPtr;
-    qDeleteAll(rc->pipelines);
-    for (const auto &samplerInfo : std::as_const(rc->samplers))
-        delete samplerInfo.second;
-
     nvgDeleteInternal(ctx);
 }
 

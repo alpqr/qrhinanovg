@@ -174,7 +174,7 @@ void drawGraph(NVGcontext* vg, float x, float y, float w, float h, float t)
 }
 
 // called on every frame outside the render pass
-void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
+void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, const QPointF &mousePos)
 {
     nvgBeginRhi(vg, cb, rt);
 
@@ -234,7 +234,7 @@ void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
     nvgFillColor(vg, nvgRGBA(220,220,220,160));
     nvgText(vg, x+w/2,y+16, "title", NULL);
 
-    drawEyes(vg, 600, 600, 120, 120, 500, 500, 1);
+    drawEyes(vg, 600, 600, 120, 120, mousePos.x(), mousePos.y(), 1);
     drawGraph(vg, 200, 500, 100, 100, 1.0);
 
     nvgEnd(vg);
@@ -281,6 +281,7 @@ struct Window : public QWindow
 
     void exposeEvent(QExposeEvent *) override;
     bool event(QEvent *) override;
+    void mouseMoveEvent(QMouseEvent *) override;
 
     QRhi::Implementation m_graphicsApi;
 
@@ -297,6 +298,7 @@ struct Window : public QWindow
     float m_rotation = 0;
     float m_opacity = 1;
     int m_opacityDir = -1;
+    QPointF m_mousePos;
 };
 
 Window::Window(QRhi::Implementation graphicsApi)
@@ -364,6 +366,11 @@ bool Window::event(QEvent *e)
     }
 
     return QWindow::event(e);
+}
+
+void Window::mouseMoveEvent(QMouseEvent *e)
+{
+    m_mousePos = e->scenePosition();
 }
 
 void Window::init()
@@ -549,7 +556,7 @@ void Window::render()
     u->updateDynamicBuffer(m_ubuf.get(), 64, 4, &m_opacity);
 
     m_rhi->makeThreadLocalNativeContextCurrent();
-    prepareRenderTest(cb, rt);
+    prepareRenderTest(cb, rt, m_mousePos);
 
     cb->beginPass(rt, QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u, QRhiCommandBuffer::ExternalContent);
 
