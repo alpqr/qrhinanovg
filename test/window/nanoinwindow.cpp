@@ -11,6 +11,9 @@
 
 #include "nanovg_rhi.h"
 
+// must match nanovg_rhi.cpp
+#define USE_GL 0
+
 static QByteArray getFile(const QString &name)
 {
     QFile f(name);
@@ -558,7 +561,11 @@ void Window::render()
     m_rhi->makeThreadLocalNativeContextCurrent();
     prepareRenderTest(cb, rt, m_mousePos);
 
-    cb->beginPass(rt, QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u, QRhiCommandBuffer::ExternalContent);
+    cb->beginPass(rt, QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u
+#if USE_GL
+                  , QRhiCommandBuffer::ExternalContent
+#endif
+                  );
 
     cb->setGraphicsPipeline(m_ps.get());
     cb->setViewport({ 0, 0, float(outputSizeInPixels.width()), float(outputSizeInPixels.height()) });
@@ -568,9 +575,13 @@ void Window::render()
     cb->setVertexInput(0, 1, &vbufBinding);
     cb->draw(3);
 
+#if USE_GL
     cb->beginExternal();
+#endif
     renderTest();
+#if USE_GL
     cb->endExternal();
+#endif
 
     cb->endPass();
 
