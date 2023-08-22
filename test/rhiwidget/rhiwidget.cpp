@@ -30,8 +30,7 @@ static QByteArray getFile(const QString &name)
 class Widget : public QRhiWidget
 {
 public:
-    Widget(QWidget *parent = nullptr);
-    ~Widget();
+    Widget(QWidget *parent = nullptr) : QRhiWidget(parent) { }
 
     void initialize(QRhiCommandBuffer *cb) override;
     void render(QRhiCommandBuffer *cb) override;
@@ -48,19 +47,8 @@ private:
     float m_opacity = 1;
     int m_opacityDir = -1;
 
-    NVGcontext *m_vg = nullptr;
+    NanoVG m_vg;
 };
-
-Widget::Widget(QWidget *parent)
-    : QRhiWidget(parent)
-{
-}
-
-Widget::~Widget()
-{
-    if (m_vg)
-        nvgDeleteRhi(m_vg);
-}
 
 void Widget::initialize(QRhiCommandBuffer *cb)
 {
@@ -112,16 +100,11 @@ void Widget::initialize(QRhiCommandBuffer *cb)
         resourceUpdates->uploadStaticBuffer(m_vbuf.get(), vertexData);
         cb->resourceUpdate(resourceUpdates);
 
-        if (m_vg) {
-            nvgDeleteRhi(m_vg);
-            m_vg = nullptr;
-        }
-        m_vg = nvgCreateRhi(m_rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-
+        m_vg.create(m_rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
         QByteArray font = getFile(QLatin1String(":/fonts/RobotoMono-Medium.ttf"));
         unsigned char *fontData = (unsigned char *) malloc(font.size());
         memcpy(fontData, font.constData(), font.size());
-        nvgCreateFontMem(m_vg, "font", fontData, font.size(), 1);
+        nvgCreateFontMem(m_vg.ctx, "font", fontData, font.size(), 1);
     }
 
     const QSize outputSize = renderTarget()->pixelSize();
@@ -144,19 +127,19 @@ void Widget::render(QRhiCommandBuffer *cb)
     }
     u->updateDynamicBuffer(m_ubuf.get(), 64, 4, &m_opacity);
 
-    nvgBeginRhi(m_vg, cb, renderTarget());
+    m_vg.begin(cb, renderTarget());
 
-    nvgBeginPath(m_vg);
-    nvgRect(m_vg, 10, 10, 200, 200);
-    nvgFillColor(m_vg, nvgRGBA(255, 0, 0, 255));
-    nvgFill(m_vg);
+    nvgBeginPath(m_vg.ctx);
+    nvgRect(m_vg.ctx, 10, 10, 200, 200);
+    nvgFillColor(m_vg.ctx, nvgRGBA(255, 0, 0, 255));
+    nvgFill(m_vg.ctx);
 
-    nvgFontFace(m_vg, "font");
-    nvgFontSize(m_vg, 36.0f);
-    nvgFillColor(m_vg, nvgRGBA(220, 0, 220, 255));
-    nvgText(m_vg, 10, 300, "hello world", nullptr);
+    nvgFontFace(m_vg.ctx, "font");
+    nvgFontSize(m_vg.ctx, 36.0f);
+    nvgFillColor(m_vg.ctx, nvgRGBA(220, 0, 220, 255));
+    nvgText(m_vg.ctx, 10, 300, "hello world", nullptr);
 
-    nvgEnd(m_vg);
+    m_vg.end();
 
     const QSize outputSizeInPixels = renderTarget()->pixelSize();
     cb->beginPass(renderTarget(), QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u);
@@ -169,7 +152,7 @@ void Widget::render(QRhiCommandBuffer *cb)
     cb->setVertexInput(0, 1, &vbufBinding);
     cb->draw(3);
 
-    nvgRender(m_vg);
+    m_vg.render();
 
     cb->endPass();
 

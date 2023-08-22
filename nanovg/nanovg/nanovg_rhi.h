@@ -35,12 +35,21 @@ enum NVGcreateFlags {
     NVG_STENCIL_STROKES	= 1<<1
 };
 
-NVGcontext *nvgCreateRhi(QRhi *rhi, int flags);
-void nvgDeleteRhi(NVGcontext *ctx);
+struct NanoVG
+{
+    ~NanoVG();
+    void create(QRhi *rhi, int flags);
+    void destroy();
 
-// Use this instead of nvgBeginFrame(). Just prepares, does not record draw calls.
-// For that, call nvgRender() after cb->beginPass().
-void nvgBeginRhi(NVGcontext *ctx, QRhiCommandBuffer *cb, QRhiRenderTarget *rt);
+    // begin() and end() must be called outside a render pass
+    void begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt);
+    void end();
+
+    // then when recording the render pass, call render()
+    void render();
+
+    NVGcontext *ctx = nullptr;
+};
 
 // These are additional flags on top of NVGimageFlags.
 enum NVGimageFlagsRhi {

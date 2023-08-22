@@ -11,32 +11,29 @@
 
 #include "nanovg_rhi.h"
 
-// must match nanovg_rhi.cpp
-#define USE_GL 0
-
 static QByteArray getFile(const QString &name)
 {
     QFile f(name);
     return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
 }
 
-NVGcontext *vg;
+NanoVG vg;
 
 // called once
 void initTest(QRhi *rhi)
 {
-    vg = nvgCreateRhi(rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+    vg.create(rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
 
     QByteArray font = getFile(QLatin1String(":/fonts/RobotoMono-Medium.ttf"));
     unsigned char *fontData = (unsigned char *) malloc(font.size());
     memcpy(fontData, font.constData(), font.size());
 
-    qDebug() << nvgCreateFontMem(vg, "font", fontData, font.size(), 1);
+    nvgCreateFontMem(vg.ctx, "font", fontData, font.size(), 1);
 }
 
 void cleanupTest()
 {
-    nvgDeleteRhi(vg);
+    vg.destroy();
 }
 
 void drawEyes(NVGcontext* vg, float x, float y, float w, float h, float mx, float my, float t)
@@ -179,17 +176,17 @@ void drawGraph(NVGcontext* vg, float x, float y, float w, float h, float t)
 // called on every frame outside the render pass
 void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, const QPointF &mousePos)
 {
-    nvgBeginRhi(vg, cb, rt);
+    vg.begin(cb, rt);
 
-    nvgBeginPath(vg);
-    nvgRect(vg, 10, 10, 200, 200);
-    nvgFillColor(vg, nvgRGBA(255, 0, 0, 255));
-    nvgFill(vg);
+    nvgBeginPath(vg.ctx);
+    nvgRect(vg.ctx, 10, 10, 200, 200);
+    nvgFillColor(vg.ctx, nvgRGBA(255, 0, 0, 255));
+    nvgFill(vg.ctx);
 
-    nvgFontFace(vg, "font");
-    nvgFontSize(vg, 36.0f);
-    nvgFillColor(vg, nvgRGBA(220, 0, 220, 255));
-    nvgText(vg, 10, 300, "hello world", nullptr);
+    nvgFontFace(vg.ctx, "font");
+    nvgFontSize(vg.ctx, 36.0f);
+    nvgFillColor(vg.ctx, nvgRGBA(220, 0, 220, 255));
+    nvgText(vg.ctx, 10, 300, "hello world", nullptr);
 
 
     float x = 300;
@@ -198,55 +195,55 @@ void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, const QPoint
     float h = 500;
     float cornerRadius = 10.0;
     // Window
-    nvgBeginPath(vg);
-    nvgRoundedRect(vg, x,y, w,h, cornerRadius);
-    nvgFillColor(vg, nvgRGBA(28,30,34,192));
-    //	nvgFillColor(vg, nvgRGBA(0,0,0,128));
-    nvgFill(vg);
+    nvgBeginPath(vg.ctx);
+    nvgRoundedRect(vg.ctx, x,y, w,h, cornerRadius);
+    nvgFillColor(vg.ctx, nvgRGBA(28,30,34,192));
+    //	nvgFillColor(vg.ctx, nvgRGBA(0,0,0,128));
+    nvgFill(vg.ctx);
 
     // Drop shadow
-    NVGpaint  shadowPaint = nvgBoxGradient(vg, x,y+2, w,h, cornerRadius*2, 10, nvgRGBA(0,0,0,128), nvgRGBA(0,0,0,0));
-    nvgBeginPath(vg);
-    nvgRect(vg, x-10,y-10, w+20,h+30);
-    nvgRoundedRect(vg, x,y, w,h, cornerRadius);
-    nvgPathWinding(vg, NVG_HOLE);
-    nvgFillPaint(vg, shadowPaint);
-    nvgFill(vg);
+    NVGpaint  shadowPaint = nvgBoxGradient(vg.ctx, x,y+2, w,h, cornerRadius*2, 10, nvgRGBA(0,0,0,128), nvgRGBA(0,0,0,0));
+    nvgBeginPath(vg.ctx);
+    nvgRect(vg.ctx, x-10,y-10, w+20,h+30);
+    nvgRoundedRect(vg.ctx, x,y, w,h, cornerRadius);
+    nvgPathWinding(vg.ctx, NVG_HOLE);
+    nvgFillPaint(vg.ctx, shadowPaint);
+    nvgFill(vg.ctx);
 
     // Header
-    NVGpaint  headerPaint = nvgLinearGradient(vg, x,y,x,y+15, nvgRGBA(255,255,255,8), nvgRGBA(0,0,0,16));
-    nvgBeginPath(vg);
-    nvgRoundedRect(vg, x+1,y+1, w-2,30, cornerRadius-1);
-    nvgFillPaint(vg, headerPaint);
-    nvgFill(vg);
-    nvgBeginPath(vg);
-    nvgMoveTo(vg, x+0.5f, y+0.5f+30);
-    nvgLineTo(vg, x+0.5f+w-1, y+0.5f+30);
-    nvgStrokeColor(vg, nvgRGBA(0,0,0,32));
-    nvgStroke(vg);
+    NVGpaint  headerPaint = nvgLinearGradient(vg.ctx, x,y,x,y+15, nvgRGBA(255,255,255,8), nvgRGBA(0,0,0,16));
+    nvgBeginPath(vg.ctx);
+    nvgRoundedRect(vg.ctx, x+1,y+1, w-2,30, cornerRadius-1);
+    nvgFillPaint(vg.ctx, headerPaint);
+    nvgFill(vg.ctx);
+    nvgBeginPath(vg.ctx);
+    nvgMoveTo(vg.ctx, x+0.5f, y+0.5f+30);
+    nvgLineTo(vg.ctx, x+0.5f+w-1, y+0.5f+30);
+    nvgStrokeColor(vg.ctx, nvgRGBA(0,0,0,32));
+    nvgStroke(vg.ctx);
 
-    nvgFontSize(vg, 15.0f);
-    nvgFontFace(vg, "font");
-    nvgTextAlign(vg,NVG_ALIGN_CENTER|NVG_ALIGN_MIDDLE);
+    nvgFontSize(vg.ctx, 15.0f);
+    nvgFontFace(vg.ctx, "font");
+    nvgTextAlign(vg.ctx,NVG_ALIGN_CENTER|NVG_ALIGN_MIDDLE);
 
-    nvgFontBlur(vg,2);
-    nvgFillColor(vg, nvgRGBA(0,0,0,128));
-    nvgText(vg, x+w/2,y+16+1, "title", NULL);
+    nvgFontBlur(vg.ctx, 2);
+    nvgFillColor(vg.ctx, nvgRGBA(0,0,0,128));
+    nvgText(vg.ctx, x+w/2,y+16+1, "title", NULL);
 
-    nvgFontBlur(vg,0);
-    nvgFillColor(vg, nvgRGBA(220,220,220,160));
-    nvgText(vg, x+w/2,y+16, "title", NULL);
+    nvgFontBlur(vg.ctx,0);
+    nvgFillColor(vg.ctx, nvgRGBA(220,220,220,160));
+    nvgText(vg.ctx, x+w/2,y+16, "title", NULL);
 
-    drawEyes(vg, 600, 600, 120, 120, mousePos.x(), mousePos.y(), 1);
-    drawGraph(vg, 200, 500, 100, 100, 1.0);
+    drawEyes(vg.ctx, 600, 600, 120, 120, mousePos.x(), mousePos.y(), 1);
+    drawGraph(vg.ctx, 200, 500, 100, 100, 1.0);
 
-    nvgEnd(vg);
+    vg.end();
 }
 
 // called one very frame inside the render pass
 void renderTest()
 {
-    nvgRender(vg);
+    vg.render();
 }
 
 static float vertexData[] = {
@@ -561,11 +558,7 @@ void Window::render()
     m_rhi->makeThreadLocalNativeContextCurrent();
     prepareRenderTest(cb, rt, m_mousePos);
 
-    cb->beginPass(rt, QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u
-#if USE_GL
-                  , QRhiCommandBuffer::ExternalContent
-#endif
-                  );
+    cb->beginPass(rt, QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u);
 
     cb->setGraphicsPipeline(m_ps.get());
     cb->setViewport({ 0, 0, float(outputSizeInPixels.width()), float(outputSizeInPixels.height()) });
@@ -575,13 +568,7 @@ void Window::render()
     cb->setVertexInput(0, 1, &vbufBinding);
     cb->draw(3);
 
-#if USE_GL
-    cb->beginExternal();
-#endif
     renderTest();
-#if USE_GL
-    cb->endExternal();
-#endif
 
     cb->endPass();
 
