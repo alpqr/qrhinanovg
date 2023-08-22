@@ -7,6 +7,8 @@ target_sources(${nanovg_target} PRIVATE
     ${nanovg_sources}
 )
 
+target_compile_definitions(${nanovg_target} PRIVATE NVG_NO_STB)
+
 target_include_directories(${nanovg_target} PRIVATE
     ${nanovg_base}
     ${nanovg_base}/nanovg
