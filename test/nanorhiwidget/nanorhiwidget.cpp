@@ -220,9 +220,11 @@ int main(int argc, char **argv)
     if (cmdLineParser.isSet(mtlOption))
         graphicsApi = QRhiWidget::Api::Metal;
 
+    qDebug() << "Selected graphics API is" << graphicsApi;
+    qDebug("This is a multi-api example, use command line arguments to override:\n%s", qPrintable(cmdLineParser.helpText()));
+
     Widget *rhiWidget = new Widget;
     rhiWidget->setApi(graphicsApi);
-    qDebug() << rhiWidget->api();
 
     QVBoxLayout *layout = new QVBoxLayout;
     layout->addWidget(rhiWidget);
