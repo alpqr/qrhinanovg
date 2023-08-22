@@ -35,4 +35,5 @@ qt6_add_resources(nanorhiwidget "resources"
         "../shared"
     FILES
         "../shared/fonts/RobotoMono-Medium.ttf"
+        "../shared/qtlogo.png"
 )

@@ -31,6 +31,7 @@ class Widget : public QRhiWidget
 {
 public:
     Widget(QWidget *parent = nullptr) : QRhiWidget(parent) { }
+    ~Widget();
 
     void initialize(QRhiCommandBuffer *cb) override;
     void render(QRhiCommandBuffer *cb) override;
@@ -48,7 +49,14 @@ private:
     int m_opacityDir = -1;
 
     NanoVG m_vg;
+    int m_imageId = 0;
 };
+
+Widget::~Widget()
+{
+    if (m_imageId)
+        nvgDeleteImage(m_vg.ctx, m_imageId);
+}
 
 void Widget::initialize(QRhiCommandBuffer *cb)
 {
@@ -105,6 +113,10 @@ void Widget::initialize(QRhiCommandBuffer *cb)
         unsigned char *fontData = (unsigned char *) malloc(font.size());
         memcpy(fontData, font.constData(), font.size());
         nvgCreateFontMem(m_vg.ctx, "font", fontData, font.size(), 1);
+
+        QImage img;
+        img.load(QLatin1String(":/qtlogo.png"));
+        m_imageId = nvgCreateImageRGBA(m_vg.ctx, img.width(), img.height(), 0, img.constBits());
     }
 
     const QSize outputSize = renderTarget()->pixelSize();
@@ -130,8 +142,11 @@ void Widget::render(QRhiCommandBuffer *cb)
     m_vg.begin(cb, renderTarget());
 
     nvgBeginPath(m_vg.ctx);
-    nvgRect(m_vg.ctx, 10, 10, 200, 200);
-    nvgFillColor(m_vg.ctx, nvgRGBA(255, 0, 0, 255));
+    int imageWidth, imageHeight;
+    nvgImageSize(m_vg.ctx, m_imageId, &imageWidth, &imageHeight);
+    nvgRect(m_vg.ctx, 10, 10, imageWidth, imageHeight);
+    NVGpaint imagePaint = nvgImagePattern(m_vg.ctx, 10, 10, imageWidth, imageHeight, 0, m_imageId, 1);
+    nvgFillPaint(m_vg.ctx, imagePaint);
     nvgFill(m_vg.ctx);
 
     nvgFontFace(m_vg.ctx, "font");
@@ -225,6 +240,7 @@ int main(int argc, char **argv)
 
     Widget *rhiWidget = new Widget;
     rhiWidget->setApi(graphicsApi);
+    rhiWidget->setDebugLayer(true);
 
     QVBoxLayout *layout = new QVBoxLayout;
     layout->addWidget(rhiWidget);
