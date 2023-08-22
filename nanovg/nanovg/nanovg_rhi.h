@@ -40,6 +40,7 @@ struct NanoVG
     ~NanoVG();
     void create(QRhi *rhi, int flags);
     void destroy();
+    bool isValid() const { return ctx != nullptr; }
 
     // begin() and end() must be called outside a render pass
     void begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt);
