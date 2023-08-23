@@ -4,31 +4,38 @@
 #ifndef TESTITEM_H
 #define TESTITEM_H
 
-#include "nanoitem.h"
+#include <QQuickRhiItem>
 #include "nanovg_rhi.h"
 
-class TestPainter : public NanoItemRenderer
+class TestItemRenderer : public QQuickRhiItemRenderer
 {
 public:
-    ~TestPainter();
-    void sync(NanoItem *item) override;
-    void prepare(QRhi *rhi, QRhiCommandBuffer *cb, QRhiRenderTarget *rt, float opacity, const QMatrix4x4 &mvp) override;
-    void render() override;
+    void initialize(QRhiCommandBuffer *cb) override;
+    void synchronize(QQuickRhiItem *item) override;
+    void render(QRhiCommandBuffer *cb) override;
 
 private:
+    QRhi *m_rhi = nullptr;
+    QRhiRenderTarget *m_rt = nullptr;
+    float m_dpr = 1.0f;
+
     NanoVG m_vg;
+
+    QPointF m_lookPos;
 };
 
-class TestNanoItem : public NanoItem
+class TestItem : public QQuickRhiItem
 {
     Q_OBJECT
     QML_NAMED_ELEMENT(TestNanoItem)
 
 public:
-    NanoItemRenderer *createRenderer() override { return new TestPainter; }
+    TestItem(QQuickItem *parent = nullptr);
+    QQuickRhiItemRenderer *createRenderer() override;
+    void mousePressEvent(QMouseEvent *e) override;
+    void mouseMoveEvent(QMouseEvent *e) override;
 
-private:
-    NanoVG m_vg;
+    QPointF m_lookPos;
 };
 
 #endif

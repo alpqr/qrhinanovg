@@ -11,8 +11,7 @@ find_package(Qt6 COMPONENTS ShaderTools)
 
 qt_add_executable(nanoitem
     main.cpp
-    nanoitem.cpp nanoitem.h
-    testitem.h
+    testitem.cpp testitem.h
 )
 
 set(nanovg_base ../../nanovg)
