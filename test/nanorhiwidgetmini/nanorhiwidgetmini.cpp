@@ -30,7 +30,7 @@ void Widget::render(QRhiCommandBuffer *cb)
     nvgRotate(vg.ctx, qDegreesToRadians(rotation++));
     nvgTranslate(vg.ctx, -100, -100);
     nvgBeginPath(vg.ctx);
-    nvgRect(vg.ctx, 10, 10, 200, 200);
+    nvgRect(vg.ctx, 0, 0, 200, 200);
     nvgFillColor(vg.ctx, nvgRGBA(255, 0, 0, 255));
     nvgFill(vg.ctx);
     vg.end();
