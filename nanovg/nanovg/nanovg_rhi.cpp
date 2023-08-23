@@ -265,6 +265,7 @@ struct RHINVGcontext
     QRhi *rhi = nullptr;
     QRhiCommandBuffer *cb = nullptr;
     QRhiRenderTarget *rt = nullptr;
+    float dpr = 1.0f;
 
     RHINVGtexture* textures = nullptr;
     float view[2] = {};
@@ -1419,13 +1420,15 @@ void NanoVG::destroy()
     }
 }
 
-void NanoVG::begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
+void NanoVG::begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, float devicePixelRatio)
 {
     RHINVGcontext *rc = (RHINVGcontext*) nvgInternalParams(ctx)->userPtr;
     rc->cb = cb;
     rc->rt = rt;
+    rc->dpr = qFuzzyIsNull(devicePixelRatio) ? rt->devicePixelRatio() : devicePixelRatio;
     const QSize outputPixelSize = rt->pixelSize();
-    nvgBeginFrame(ctx, outputPixelSize.width(), outputPixelSize.height(), rt->devicePixelRatio());
+    const QSize outputLogicalSize = outputPixelSize / rc->dpr;
+    nvgBeginFrame(ctx, outputLogicalSize.width(), outputLogicalSize.height(), rc->dpr);
 }
 
 void NanoVG::end()

@@ -42,8 +42,15 @@ struct NanoVG
     void destroy();
     bool isValid() const { return ctx != nullptr; }
 
-    // begin() and end() must be called outside a render pass
-    void begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt);
+    // begin() and end() must be called outside a render pass.
+    //
+    // If devicePixelRatio is 0, rt->devicePixelRatio() is used. Specifying an
+    // override is relevant when the target is a texture that is independent
+    // from any on-screen window: rt's dpr is 1 then, but we may still want to
+    // take an on-screen widget or window's dpr into account. (because we know
+    // that the texture is eventually used in that window for something)
+    //
+    void begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, float devicePixelRatio = 0.0f);
     void end();
 
     // then when recording the render pass, call render()
