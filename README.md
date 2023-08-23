@@ -1,8 +1,16 @@
 Qt (QRhi) backend for https://github.com/memononen/nanovg
 
-3D API independent (should work with anything QRhi supports)
+3D API independent, should work with anything QRhi supports (D3D11, D3D12,
+Vulkan, Metal, OpenGL), on all platforms QRhi and Qt works.
 
-The adaptation is somewhat different from others since a plain BeginFrame/EndFrame is not suitable.
+However, nanovg_rhi.cpp and .h require Qt 6.6 (where QRhi is finally
+semi-public, i.e. including <rhi/qrhi.h> works), whereas some of the examples
+rely on work-in-progress Qt 6.7 APIs (QRhiWidget, QQuickRhiItem).
+
+Won't build with older Qt versions, although the integration and the
+QWindow-based example could be backported.
+
+This NanoVG adaptation is somewhat different from others since a plain nvgBeginFrame/EndFrame is not suitable.
 
 ```
 NanoVG vg;
@@ -42,7 +50,7 @@ Example apps:
 
 A bunch of NanoVG features are not exercised and so not tested; should port the full upstream demo some day.
 
-Below is a minimal, complete QRhiWidget-based application with a rotation red rectangle:
+Below is a minimal, complete QRhiWidget-based application with a rotating red rectangle:
 
 ```
 #include <QApplication>
