@@ -17,7 +17,7 @@ private:
     int rotation = 0;
 };
 
-void Widget::initialize(QRhiCommandBuffer *cb)
+void Widget::initialize(QRhiCommandBuffer *)
 {
     vg.create(rhi(), NVG_ANTIALIAS | NVG_STENCIL_STROKES);
 }
