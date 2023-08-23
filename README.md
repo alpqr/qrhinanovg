@@ -71,7 +71,8 @@ private:
 
 void Widget::initialize(QRhiCommandBuffer *)
 {
-    vg.create(rhi(), NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+    if (!vg.isValid())
+        vg.create(rhi(), NVG_ANTIALIAS | NVG_STENCIL_STROKES);
 }
 
 void Widget::render(QRhiCommandBuffer *cb)
