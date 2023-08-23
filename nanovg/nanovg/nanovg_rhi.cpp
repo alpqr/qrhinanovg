@@ -757,7 +757,7 @@ static int allocFragUniforms(RHINVGcontext *rc, int n)
     return ret;
 }
 
-inline RHINVGfragUniforms* nvg__fragUniformPtr(RHINVGcontext *rc, int i)
+inline RHINVGfragUniforms *fragUniformPtr(RHINVGcontext *rc, int i)
 {
     return (RHINVGfragUniforms*)&rc->uniforms[i];
 }
@@ -933,17 +933,17 @@ static void renderFill(void* uptr, NVGpaint* paint, NVGcompositeOperationState c
         call->fragmentUniformBufferOffset = allocFragUniforms(rc, 2);
         if (call->fragmentUniformBufferOffset == -1) goto error;
         // Simple shader for stencil
-        frag = nvg__fragUniformPtr(rc, call->fragmentUniformBufferOffset);
+        frag = fragUniformPtr(rc, call->fragmentUniformBufferOffset);
         memset(frag, 0, sizeof(*frag));
         frag->strokeThr = -1.0f;
         frag->type = NVG_SHADER_SIMPLE;
         // Fill shader
-        convertPaint(rc, nvg__fragUniformPtr(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize), paint, scissor, fringe, fringe, -1.0f);
+        convertPaint(rc, fragUniformPtr(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize), paint, scissor, fringe, fringe, -1.0f);
     } else {
         call->fragmentUniformBufferOffset = allocFragUniforms(rc, 1);
         if (call->fragmentUniformBufferOffset == -1) goto error;
         // Fill shader
-        convertPaint(rc, nvg__fragUniformPtr(rc, call->fragmentUniformBufferOffset), paint, scissor, fringe, fringe, -1.0f);
+        convertPaint(rc, fragUniformPtr(rc, call->fragmentUniformBufferOffset), paint, scissor, fringe, fringe, -1.0f);
     }
 
     return;
@@ -992,14 +992,14 @@ static void renderStroke(void* uptr, NVGpaint* paint, NVGcompositeOperationState
         call->fragmentUniformBufferOffset = allocFragUniforms(rc, 2);
         if (call->fragmentUniformBufferOffset == -1) goto error;
 
-        convertPaint(rc, nvg__fragUniformPtr(rc, call->fragmentUniformBufferOffset), paint, scissor, strokeWidth, fringe, -1.0f);
-        convertPaint(rc, nvg__fragUniformPtr(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize), paint, scissor, strokeWidth, fringe, 1.0f - 0.5f/255.0f);
+        convertPaint(rc, fragUniformPtr(rc, call->fragmentUniformBufferOffset), paint, scissor, strokeWidth, fringe, -1.0f);
+        convertPaint(rc, fragUniformPtr(rc, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize), paint, scissor, strokeWidth, fringe, 1.0f - 0.5f/255.0f);
 
     } else {
         // Fill shader
         call->fragmentUniformBufferOffset = allocFragUniforms(rc, 1);
         if (call->fragmentUniformBufferOffset == -1) goto error;
-        convertPaint(rc, nvg__fragUniformPtr(rc, call->fragmentUniformBufferOffset), paint, scissor, strokeWidth, fringe, -1.0f);
+        convertPaint(rc, fragUniformPtr(rc, call->fragmentUniformBufferOffset), paint, scissor, strokeWidth, fringe, -1.0f);
     }
 
     return;
@@ -1033,7 +1033,7 @@ static void renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationSt
     // Fill shader
     call->fragmentUniformBufferOffset = allocFragUniforms(rc, 1);
     if (call->fragmentUniformBufferOffset == -1) goto error;
-    frag = nvg__fragUniformPtr(rc, call->fragmentUniformBufferOffset);
+    frag = fragUniformPtr(rc, call->fragmentUniformBufferOffset);
     convertPaint(rc, frag, paint, scissor, 1.0f, fringe, -1.0f);
     frag->type = NVG_SHADER_IMG;
 
@@ -1219,56 +1219,65 @@ static void renderEndPrepare(void* uptr)
 
 // ********** render phase stuff (that is called only after the command buffer has started to record a render pass)
 
+inline void bindPipeline(RHINVGcontext *rc, RHINVGcall *call,
+                         int pipelineIndex, int srbIndex,
+                         const QRhiCommandBuffer::DynamicOffset &dynamicOffset,
+                         bool indexedDraw,
+                         bool *needsViewport)
+{
+    rc->cb->setGraphicsPipeline(call->ps[pipelineIndex]);
+    rc->cb->setShaderResources(call->srb[srbIndex], 1, &dynamicOffset);
+    if (*needsViewport) {
+        *needsViewport = false;
+        const QSize size = rc->rt->pixelSize();
+        rc->cb->setViewport({ 0.0f, 0.0f, float(size.width()), float(size.height()) });
+    }
+    QRhiCommandBuffer::VertexInput vbufBinding(rc->vertexBuffer, 0);
+    if (indexedDraw)
+        rc->cb->setVertexInput(0, 1, &vbufBinding, rc->indexBuffer, 0, QRhiCommandBuffer::IndexUInt32);
+    else
+        rc->cb->setVertexInput(0, 1, &vbufBinding);
+}
+
 static void renderpass_render(void* uptr)
 {
     RHINVGcontext *rc = (RHINVGcontext*)uptr;
-    bool needsViewport = true; // ### todo
+    bool needsViewport = true;
 
     for (int i = 0; i < rc->ncalls; i++) {
         RHINVGcall *call = &rc->calls[i];
         RHINVGpath *paths = call->pathCount ? &rc->paths[call->pathOffset] : nullptr;
         int npaths = call->pathCount;
-        QRhiCommandBuffer::VertexInput vbufBinding(rc->vertexBuffer, 0);
         QRhiCommandBuffer::DynamicOffset dynamicOffsetForCall(1, call->fragmentUniformBufferOffset);
         QRhiCommandBuffer::DynamicOffset dynamicOffsetForCallPlusOne(1, call->fragmentUniformBufferOffset + rc->oneFragmentUniformBufferSize);
 
         if (call->type == RHINVG_FILL) {
             // 1. Draw shapes
             if (call->indexCount) {
-                rc->cb->setGraphicsPipeline(call->ps[0]);
-                rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCall);
-                rc->cb->setVertexInput(0, 1, &vbufBinding, rc->indexBuffer, 0, QRhiCommandBuffer::IndexUInt32);
+                bindPipeline(rc, call, 0, 0, dynamicOffsetForCall, true, &needsViewport);
                 rc->cb->drawIndexed(call->indexCount, 1, call->indexOffset);
             }
 
             // 2. Draw anti-aliased pixels
             if (rc->flags & NVG_ANTIALIAS) {
-                rc->cb->setGraphicsPipeline(call->ps[1]);
-                rc->cb->setShaderResources(call->srb[1], 1, &dynamicOffsetForCallPlusOne);
-                rc->cb->setVertexInput(0, 1, &vbufBinding);
+                bindPipeline(rc, call, 1, 1, dynamicOffsetForCallPlusOne, false, &needsViewport);
                 // Draw fringes
                 for (int i = 0; i < npaths; i++)
                     rc->cb->draw(paths[i].strokeCount, 1, paths[i].strokeOffset);
             }
 
             // 3. Draw fill
-            rc->cb->setGraphicsPipeline(call->ps[2]);
-            rc->cb->setShaderResources(call->srb[1], 1, &dynamicOffsetForCallPlusOne);
-            rc->cb->setVertexInput(0, 1, &vbufBinding);
+            bindPipeline(rc, call, 2, 1, dynamicOffsetForCallPlusOne, false, &needsViewport);
             rc->cb->draw(call->triangleCount, 1, call->triangleOffset);
         } else if (call->type == RHINVG_CONVEXFILL) {
             // 1. Draw fill
             if (call->indexCount) {
-                rc->cb->setGraphicsPipeline(call->ps[0]);
-                rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCall);
-                rc->cb->setVertexInput(0, 1, &vbufBinding, rc->indexBuffer, 0, QRhiCommandBuffer::IndexUInt32);
+                bindPipeline(rc, call, 0, 0, dynamicOffsetForCall, true, &needsViewport);
                 rc->cb->drawIndexed(call->indexCount, 1, call->indexOffset);
             }
 
             // 2. Draw fringes
-            rc->cb->setGraphicsPipeline(call->ps[1]);
-            rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCall);
-            rc->cb->setVertexInput(0, 1, &vbufBinding);
+            bindPipeline(rc, call, 1, 0, dynamicOffsetForCall, false, &needsViewport);
             for (int i = 0; i < npaths; i++) {
                 if (paths[i].strokeCount > 0) {
                     rc->cb->draw(paths[i].strokeCount, 1, paths[i].strokeOffset);
@@ -1277,23 +1286,17 @@ static void renderpass_render(void* uptr)
         } else if (call->type == RHINVG_STROKE) {
             if (!(rc->flags & NVG_STENCIL_STROKES)) {
                 // 1. Draw Strokes
-                rc->cb->setGraphicsPipeline(call->ps[0]);
-                rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCall);
-                rc->cb->setVertexInput(0, 1, &vbufBinding);
+                bindPipeline(rc, call, 0, 0, dynamicOffsetForCall, false, &needsViewport);
                 for (int i = 0; i < npaths; i++)
                     rc->cb->draw(paths[i].strokeCount, paths[i].strokeOffset);
             } else {
                 // 2. Fill the stroke base without overlap
-                rc->cb->setGraphicsPipeline(call->ps[1]);
-                rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCallPlusOne);
-                rc->cb->setVertexInput(0, 1, &vbufBinding);
+                bindPipeline(rc, call, 1, 0, dynamicOffsetForCallPlusOne, false, &needsViewport);
                 for (int i = 0; i < npaths; i++)
                     rc->cb->draw(paths[i].strokeCount, 1, paths[i].strokeOffset);
 
                 // 3. Draw anti-aliased pixels.
-                rc->cb->setGraphicsPipeline(call->ps[2]);
-                rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCall);
-                rc->cb->setVertexInput(0, 1, &vbufBinding);
+                bindPipeline(rc, call, 2, 0, dynamicOffsetForCall, false, &needsViewport);
                 for (int i = 0; i < npaths; i++) {
                     if (paths[i].strokeCount > 0) {
                         rc->cb->draw(paths[i].strokeCount, 1, paths[i].strokeOffset);
@@ -1301,9 +1304,7 @@ static void renderpass_render(void* uptr)
                 }
 
                 //  4. Clear stencil buffer.
-                rc->cb->setGraphicsPipeline(call->ps[3]);
-                rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCall);
-                rc->cb->setVertexInput(0, 1, &vbufBinding);
+                bindPipeline(rc, call, 3, 0, dynamicOffsetForCall, false, &needsViewport);
                 for (int i = 0; i < npaths; i++) {
                     if (paths[i].strokeCount > 0) {
                         rc->cb->draw(paths[i].strokeCount, 1, paths[i].strokeOffset);
@@ -1311,9 +1312,7 @@ static void renderpass_render(void* uptr)
                 }
             }
         } else if (call->type == RHINVG_TRIANGLES) {
-            rc->cb->setGraphicsPipeline(call->ps[0]);
-            rc->cb->setShaderResources(call->srb[0], 1, &dynamicOffsetForCall);
-            rc->cb->setVertexInput(0, 1, &vbufBinding);
+            bindPipeline(rc, call, 0, 0, dynamicOffsetForCall, false, &needsViewport);
             rc->cb->draw(call->triangleCount, 1, call->triangleOffset);
         }
     }
