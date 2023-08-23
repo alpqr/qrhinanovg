@@ -29,6 +29,7 @@ cb->endPass();
 ```
 
 There is no stb_image and so nvgCreateImage[Mem], use this instead:
+
 ```
 QImage img;
 img.load(QLatin1String(":/image.png"));
