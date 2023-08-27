@@ -38,7 +38,7 @@ enum NVGcreateFlags {
 struct NanoVG
 {
     ~NanoVG();
-    void create(QRhi *rhi, int flags);
+    void create(QRhi *rhi, int flags = 0);
     void destroy();
     bool isValid() const { return ctx != nullptr; }
 
