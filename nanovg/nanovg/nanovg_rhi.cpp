@@ -138,7 +138,7 @@ struct RHINVGpipelineState
     bool blendEnable = true;
     QRhiGraphicsPipeline::TargetBlend targetBlend;
 
-    int samples = 1;
+    int sampleCount = 1;
 };
 
 inline bool operator==(const RHINVGpipelineState &a, const RHINVGpipelineState &b) Q_DECL_NOTHROW
@@ -170,7 +170,7 @@ inline bool operator==(const RHINVGpipelineState &a, const RHINVGpipelineState &
            && a.targetBlend.srcAlpha == b.targetBlend.srcAlpha
            && a.targetBlend.dstAlpha == b.targetBlend.dstAlpha
            && a.targetBlend.opAlpha == b.targetBlend.opAlpha
-           && a.samples == b.samples;
+           && a.sampleCount == b.sampleCount;
 }
 
 inline bool operator!=(const RHINVGpipelineState &a, const RHINVGpipelineState &b) Q_DECL_NOTHROW
@@ -182,7 +182,7 @@ inline size_t qHash(const RHINVGpipelineState &s, size_t seed) Q_DECL_NOTHROW
 {
     // do not bother with all fields
     return qHash(s.edgeAA, seed)
-           ^ qHash(s.samples)
+           ^ qHash(s.sampleCount)
            ^ qHash(s.targetBlend.dstColor)
            ^ qHash(s.depthFunc)
            ^ qHash(s.cullMode)
@@ -345,7 +345,7 @@ static QRhiGraphicsPipeline *pipeline(RHINVGcontext *rc,
         targetBlends[i] = blend;
     ps->setTargetBlends(targetBlends.cbegin(), targetBlends.cend());
 
-    ps->setSampleCount(key.state.samples);
+    ps->setSampleCount(key.state.sampleCount);
 
     ps->setDepthTest(key.state.depthTestEnable);
     ps->setDepthWrite(key.state.depthWriteEnable);
@@ -469,7 +469,7 @@ static int renderCreate(void* uptr)
 {
     RHINVGcontext *rc = (RHINVGcontext*)uptr;
 
-    // Some platforms does not allow to have samples to unset textures.
+    // Some platforms does not allow to have unset textures.
     // Create empty one which is bound when there's no texture specified.
     rc->dummyTex = renderCreateTexture(rc, NVG_TEXTURE_ALPHA, 16, 16, 0, NULL);
 
@@ -1097,6 +1097,7 @@ static void renderEndPrepare(void* uptr)
             basePs.targetBlend.dstColor = call->blendFunc.dstRGB;
             basePs.targetBlend.srcAlpha = call->blendFunc.srcAlpha;
             basePs.targetBlend.dstAlpha = call->blendFunc.dstAlpha;
+            basePs.sampleCount = rc->rt->sampleCount();
 
             if (call->type == RHINVG_FILL) {
                 call->srb[0] = srbWithDummyTexture;
