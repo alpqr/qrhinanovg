@@ -260,6 +260,8 @@ struct RHINVGshaders
     QRhiVertexInputLayout vertexInputLayout;
 };
 
+Q_GLOBAL_STATIC(RHINVGshaders, rhinvg_shaders)
+
 struct RHINVGcontext
 {
     QRhi *rhi = nullptr;
@@ -294,7 +296,6 @@ struct RHINVGcontext
 
     int dummyTex = 0;
 
-    RHINVGshaders shaders;
     QVector<std::pair<RHINVGsamplerDesc, QRhiSampler*>> samplers;
     QHash<RHINVGpipelineStateKey, QRhiGraphicsPipeline *> pipelines;
     QRhiBuffer *vertexBuffer = nullptr;
@@ -321,11 +322,12 @@ static QRhiGraphicsPipeline *pipeline(RHINVGcontext *rc,
 
     QRhiGraphicsPipeline *ps = rc->rhi->newGraphicsPipeline();
 
+    RHINVGshaders *shaders = rhinvg_shaders();
     ps->setShaderStages({
-        { QRhiShaderStage::Vertex, rc->shaders.vs },
-        { QRhiShaderStage::Fragment, key.state.edgeAA ? rc->shaders.fsAA : rc->shaders.fs }
+        { QRhiShaderStage::Vertex, shaders->vs },
+        { QRhiShaderStage::Fragment, key.state.edgeAA ? shaders->fsAA : shaders->fs }
     });
-    ps->setVertexInputLayout(rc->shaders.vertexInputLayout);
+    ps->setVertexInputLayout(shaders->vertexInputLayout);
     ps->setShaderResourceBindings(srb);
     ps->setRenderPassDescriptor(rpDesc);
 
