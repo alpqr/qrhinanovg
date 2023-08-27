@@ -1292,7 +1292,7 @@ static void renderpass_render(void* uptr)
                 // 1. Draw Strokes
                 bindPipeline(rc, call, 0, 0, dynamicOffsetForCall, false, &needsViewport);
                 for (int i = 0; i < npaths; i++)
-                    rc->cb->draw(paths[i].strokeCount, paths[i].strokeOffset);
+                    rc->cb->draw(paths[i].strokeCount, 1, paths[i].strokeOffset);
             } else {
                 // 2. Fill the stroke base without overlap
                 bindPipeline(rc, call, 1, 0, dynamicOffsetForCallPlusOne, false, &needsViewport);
