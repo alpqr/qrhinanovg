@@ -260,10 +260,12 @@ static QShader getShader(const QString &name)
 
 struct Window : public QWindow
 {
-    Window(QRhi::Implementation graphicsApi);
+    Window(QRhi::Implementation graphicsApi, bool debugLayer);
 
     void releaseSwapChain();
 
+    QRhi::Implementation m_graphicsApi;
+    bool m_debugLayer;
 #if QT_CONFIG(opengl)
     std::unique_ptr<QOffscreenSurface> m_fallbackSurface;
 #endif
@@ -283,8 +285,6 @@ struct Window : public QWindow
     bool event(QEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;
 
-    QRhi::Implementation m_graphicsApi;
-
     bool m_running = false;
     bool m_notExposed = false;
     bool m_newlyExposed = false;
@@ -301,8 +301,9 @@ struct Window : public QWindow
     QPointF m_mousePos;
 };
 
-Window::Window(QRhi::Implementation graphicsApi)
-    : m_graphicsApi(graphicsApi)
+Window::Window(QRhi::Implementation graphicsApi, bool debugLayer)
+    : m_graphicsApi(graphicsApi),
+      m_debugLayer(debugLayer)
 {
     switch (graphicsApi) {
     case QRhi::OpenGLES2:
@@ -410,13 +411,15 @@ void Window::init()
 #ifdef Q_OS_WIN
     if (m_graphicsApi == QRhi::D3D11) {
         QRhiD3D11InitParams params;
-        params.enableDebugLayer = true;
+        if (m_debugLayer)
+            params.enableDebugLayer = true;
         m_rhi.reset(QRhi::create(QRhi::D3D11, &params, rhiFlags));
     }
 #if QT_VERSION_MAJOR > 6 || QT_VERSION_MINOR >= 6
     else if (m_graphicsApi == QRhi::D3D12) {
         QRhiD3D12InitParams params;
-        params.enableDebugLayer = true;
+        if (m_debugLayer)
+            params.enableDebugLayer = true;
         m_rhi.reset(QRhi::create(QRhi::D3D12, &params, rhiFlags));
     }
 #endif
@@ -631,6 +634,8 @@ int main(int argc, char **argv)
 #endif
     QCommandLineOption mtlOption({ "m", "metal" }, QLatin1String("Metal"));
     cmdLineParser.addOption(mtlOption);
+    QCommandLineOption debugOption({ "b", "debug" }, QLatin1String("Enable validation/debug layer, if applicable"));
+    cmdLineParser.addOption(debugOption);
 
     cmdLineParser.process(app);
     if (cmdLineParser.isSet(nullOption))
@@ -659,7 +664,8 @@ int main(int argc, char **argv)
 #if QT_CONFIG(vulkan)
     QVulkanInstance inst;
     if (graphicsApi == QRhi::Vulkan) {
-        inst.setLayers({ "VK_LAYER_KHRONOS_validation" });
+        if (cmdLineParser.isSet(debugOption))
+            inst.setLayers({ "VK_LAYER_KHRONOS_validation" });
         inst.setExtensions(QRhiVulkanInitParams::preferredInstanceExtensions());
         if (!inst.create()) {
             qWarning("Failed to create Vulkan instance, switching to OpenGL");
@@ -668,7 +674,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-    Window w(graphicsApi);
+    Window w(graphicsApi, cmdLineParser.isSet(debugOption));
 #if QT_CONFIG(vulkan)
     if (graphicsApi == QRhi::Vulkan)
         w.setVulkanInstance(&inst);

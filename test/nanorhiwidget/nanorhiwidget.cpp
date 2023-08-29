@@ -220,6 +220,8 @@ int main(int argc, char **argv)
     cmdLineParser.addOption(d3d12Option);
     QCommandLineOption mtlOption({ "m", "metal" }, QLatin1String("Metal"));
     cmdLineParser.addOption(mtlOption);
+    QCommandLineOption debugOption({ "b", "debug" }, QLatin1String("Enable validation/debug layer, if applicable"));
+    cmdLineParser.addOption(debugOption);
 
     cmdLineParser.process(app);
     if (cmdLineParser.isSet(nullOption))
@@ -240,7 +242,8 @@ int main(int argc, char **argv)
 
     Widget *rhiWidget = new Widget;
     rhiWidget->setApi(graphicsApi);
-    rhiWidget->setDebugLayer(true);
+    if (cmdLineParser.isSet(debugOption))
+        rhiWidget->setDebugLayer(true);
 
     QVBoxLayout *layout = new QVBoxLayout;
     layout->addWidget(rhiWidget);
