@@ -270,7 +270,7 @@ struct RHINVGcontext
     float dpr = 1.0f;
 
     RHINVGtexture* textures = nullptr;
-    float view[2] = {};
+    float viewRect[4] = {};
     int ntextures = 0;
     int ctextures = 0;
     int textureId = 0;
@@ -623,8 +623,10 @@ static void renderViewport(void* uptr, float width, float height, float devicePi
 {
     NVG_NOTUSED(devicePixelRatio);
     RHINVGcontext *rc = (RHINVGcontext*)uptr;
-    rc->view[0] = width;
-    rc->view[1] = height;
+    rc->viewRect[0] = 0.0f;
+    rc->viewRect[1] = 0.0f;
+    rc->viewRect[2] = width;
+    rc->viewRect[3] = height;
 }
 
 inline QRhiGraphicsPipeline::BlendFactor convertBlendFuncFactor(int factor)
@@ -1068,9 +1070,9 @@ static void renderEndPrepare(void* uptr)
         ensureBufferCapacity(&rc->indexBuffer, rc->nindices * sizeof(uint32_t));
 
         QRhiResourceUpdateBatch *u = resourceUpdateBatch(rc);
-        u->updateDynamicBuffer(rc->vsUniformBuffer, 0, 2 * sizeof(float), rc->view);
+        u->updateDynamicBuffer(rc->vsUniformBuffer, 0, 4 * sizeof(float), rc->viewRect);
         qint32 ndcIsYDown = !rc->rhi->isYUpInNDC();
-        u->updateDynamicBuffer(rc->vsUniformBuffer, 2 * sizeof(float), sizeof(qint32), &ndcIsYDown);
+        u->updateDynamicBuffer(rc->vsUniformBuffer, 4 * sizeof(float), sizeof(qint32), &ndcIsYDown);
         u->updateDynamicBuffer(rc->fsUniformBuffer, 0, rc->nuniforms * rc->oneFragmentUniformBufferSize, rc->uniforms);
         u->uploadStaticBuffer(rc->vertexBuffer, 0, rc->nverts * sizeof(NVGvertex), rc->verts);
         if (rc->nindices)
