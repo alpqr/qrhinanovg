@@ -18,7 +18,7 @@
 #ifndef NANOVG_RHI_H
 #define NANOVG_RHI_H
 
-#include <qglobal.h>
+#include <QPointF>
 #include "nanovg.h"
 
 QT_BEGIN_NAMESPACE
@@ -50,7 +50,10 @@ struct NanoVG
     // take an on-screen widget or window's dpr into account. (because we know
     // that the texture is eventually used in that window for something)
     //
-    void begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, float devicePixelRatio = 0.0f);
+    void begin(QRhiCommandBuffer *cb,
+               QRhiRenderTarget *rt,
+               const QPointF &offset = {},
+               float devicePixelRatio = 0.0f);
     void end();
 
     // then when recording the render pass, call render()

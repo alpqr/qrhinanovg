@@ -25,7 +25,7 @@ void Widget::initialize(QRhiCommandBuffer *)
 
 void Widget::render(QRhiCommandBuffer *cb)
 {
-    vg.begin(cb, renderTarget(), devicePixelRatio());
+    vg.begin(cb, renderTarget(), QPointF(0, 0), devicePixelRatio());
     nvgTranslate(vg.ctx, 100, 100);
     nvgRotate(vg.ctx, qDegreesToRadians(rotation++));
     nvgTranslate(vg.ctx, -100, -100);

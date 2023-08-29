@@ -75,7 +75,7 @@ static void drawEyes(NVGcontext* vg, float x, float y, float w, float h, float m
 
 void TestItemRenderer::render(QRhiCommandBuffer *cb)
 {
-    m_vg.begin(cb, m_rt, m_dpr);
+    m_vg.begin(cb, m_rt, {}, m_dpr);
 
     nvgBeginPath(m_vg.ctx);
     nvgRect(m_vg.ctx, 10, 10, 100, 100);

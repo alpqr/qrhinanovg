@@ -369,9 +369,9 @@ void nvgDeleteInternal(NVGcontext* ctx)
 	free(ctx);
 }
 
-// rhi modifications begin
+// rhi modification begin
 
-void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float devicePixelRatio)
+void nvgBeginFrame(NVGcontext* ctx, float x, float y, float windowWidth, float windowHeight, float devicePixelRatio)
 {
     /*	printf("Tris: draws:%d  fill:%d  stroke:%d  text:%d  TOT:%d\n",
         ctx->drawCallCount, ctx->fillTriCount, ctx->strokeTriCount, ctx->textTriCount,
@@ -409,7 +409,7 @@ void nvgBeginFrame(NVGcontext* ctx, float windowWidth, float windowHeight, float
 
     nvg__setDevicePixelRatio(ctx, devicePixelRatio);
 
-    ctx->params.renderViewport(ctx->params.userPtr, windowWidth, windowHeight, devicePixelRatio);
+    ctx->params.renderViewport(ctx->params.userPtr, x, y, windowWidth, windowHeight, devicePixelRatio);
 
     ctx->drawCallCount = 0;
     ctx->fillTriCount = 0;
@@ -427,7 +427,7 @@ void nvgEndFrame(NVGcontext *ctx)
     ctx->params.renderEndPrepare(ctx->params.userPtr);
 }
 
-// rhi modifications end
+// rhi modification end
 
 NVGcolor nvgRGB(unsigned char r, unsigned char g, unsigned char b)
 {

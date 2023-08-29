@@ -619,12 +619,12 @@ static int renderGetTextureSize(void* uptr, int image, int* w, int* h)
     return 1;
 }
 
-static void renderViewport(void* uptr, float width, float height, float devicePixelRatio)
+static void renderViewport(void* uptr, float x, float y, float width, float height, float devicePixelRatio)
 {
     NVG_NOTUSED(devicePixelRatio);
     RHINVGcontext *rc = (RHINVGcontext*)uptr;
-    rc->viewRect[0] = 0.0f;
-    rc->viewRect[1] = 0.0f;
+    rc->viewRect[0] = x;
+    rc->viewRect[1] = y;
     rc->viewRect[2] = width;
     rc->viewRect[3] = height;
 }
@@ -1426,7 +1426,10 @@ void NanoVG::destroy()
     }
 }
 
-void NanoVG::begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, float devicePixelRatio)
+void NanoVG::begin(QRhiCommandBuffer *cb,
+                   QRhiRenderTarget *rt,
+                   const QPointF &offset,
+                   float devicePixelRatio)
 {
     RHINVGcontext *rc = (RHINVGcontext*) nvgInternalParams(ctx)->userPtr;
     rc->cb = cb;
@@ -1434,7 +1437,7 @@ void NanoVG::begin(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, float devicePixe
     rc->dpr = qFuzzyIsNull(devicePixelRatio) ? rt->devicePixelRatio() : devicePixelRatio;
     const QSize outputPixelSize = rt->pixelSize();
     const QSize outputLogicalSize = outputPixelSize / rc->dpr;
-    nvgBeginFrame(ctx, outputLogicalSize.width(), outputLogicalSize.height(), rc->dpr);
+    nvgBeginFrame(ctx, offset.x(), offset.y(), outputLogicalSize.width(), outputLogicalSize.height(), rc->dpr);
 }
 
 void NanoVG::end()

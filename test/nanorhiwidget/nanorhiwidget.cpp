@@ -139,7 +139,7 @@ void Widget::render(QRhiCommandBuffer *cb)
     }
     u->updateDynamicBuffer(m_ubuf.get(), 64, 4, &m_opacity);
 
-    m_vg.begin(cb, renderTarget(), devicePixelRatio());
+    m_vg.begin(cb, renderTarget(), {}, devicePixelRatio());
 
     nvgBeginPath(m_vg.ctx);
     int imageWidth, imageHeight;

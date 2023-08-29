@@ -19,7 +19,7 @@ vg.create(rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
 
 Then within a frame (after rhi->beginFrame()) but outside a render pass:
 
-vg.begin(cb, rt, dpr); // corresponds to nvgBeginFrame()
+vg.begin(cb, rt, offset, dpr); // corresponds to nvgBeginFrame()
 nvgBeginPath(m_vg.ctx);
 nvgRect(m_vg.ctx, 10, 10, 100, 100);
 nvgFillColor(m_vg.ctx, nvgRGBA(220, 0, 0, 255));
@@ -77,7 +77,7 @@ void Widget::initialize(QRhiCommandBuffer *)
 
 void Widget::render(QRhiCommandBuffer *cb)
 {
-    vg.begin(cb, renderTarget(), devicePixelRatio());
+    vg.begin(cb, renderTarget(), QPointF(0, 0), devicePixelRatio());
     nvgTranslate(vg.ctx, 100, 100);
     nvgRotate(vg.ctx, qDegreesToRadians(rotation++));
     nvgTranslate(vg.ctx, -100, -100);
