@@ -1322,9 +1322,10 @@ static void renderpass_render(void* uptr)
     }
 
     // Reset calls
-    rc->nverts = 0;
-    rc->npaths = 0;
     rc->ncalls = 0;
+    rc->npaths = 0;
+    rc->nverts = 0;
+    rc->nindices = 0;
     rc->nuniforms = 0;
 }
 
