@@ -43,12 +43,13 @@ img.load(QLatin1String(":/image.png"));
 imageId = nvgCreateImageRGBA(vg.ctx, img.width(), img.height(), 0, img.constBits());
 ```
 
+![Screenshot](nanoitem_screenshot.png)
+(screenshot of the nanoitem example)
+
 Example apps:
 - nanowindow: Rendering in a plain QWindow (no QWidgets, no QML) (requires Qt 6.6)
 - nanorhwidget: Rendering in a QRhiWidget (requires Qt 6.7, coming 2024)
 - nanoitem: Rendering in a QQuickRhiItem in a Qt Quick scene (requires Qt 6.7, could be ported to 6.6 by not using QQuickRhiItem)
-
-A bunch of NanoVG features are not exercised and so not tested; should port the full upstream demo some day.
 
 Below is a minimal, complete QRhiWidget-based application with a rotating red rectangle:
 
