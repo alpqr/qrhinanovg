@@ -7,6 +7,7 @@
 #include <QPlatformSurfaceEvent>
 #include <QOffscreenSurface>
 #include <QFile>
+#include <QElapsedTimer>
 #include <rhi/qrhi.h>
 
 #include "nanovg_rhi.h"
@@ -15,6 +16,7 @@
 
 NanoVG vg;
 int imageId = 0;
+double cpuMs = 0.0;
 
 // called once
 void initTest(QRhi *rhi)
@@ -51,12 +53,20 @@ void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
     nvgFill(vg.ctx);
 
     nvgFontFace(vg.ctx, "font");
-    nvgFontSize(vg.ctx, 36.0f);
+    nvgFontSize(vg.ctx, 16.0f);
     nvgFillColor(vg.ctx, nvgRGBA(220, 0, 220, 255));
-    nvgText(vg.ctx, 500, 50, "hello world", nullptr);
 
-    const int w = rt->pixelSize().width() / rt->devicePixelRatio();
-    const int h = rt->pixelSize().height() / rt->devicePixelRatio();
+    const QSize pixelSize = rt->pixelSize();
+    const float dpr = rt->devicePixelRatio();
+    double gpuMs = cb->lastCompletedGpuTime() * 1000.0; // async (could refer to e.g. current frame - 2), but that matters little for a live, on-screen value
+    char msg[128];
+    snprintf(msg, sizeof(msg), "GPU time: %.5f ms Frame recording CPU time: %.5f ms", gpuMs, cpuMs);
+    nvgText(vg.ctx, 200, 20, msg, nullptr);
+    snprintf(msg, sizeof(msg), "Render target size (pixels): %dx%d DPR: %.2f", pixelSize.width(), pixelSize.height(), dpr);
+    nvgText(vg.ctx, 200, 40, msg, nullptr);
+
+    const int w = pixelSize.width() / dpr;
+    const int h = pixelSize.height() / dpr;
     renderDemo(vg.ctx, demoData.mousePos.x(), demoData.mousePos.y(), w, h, demoData.t, demoData.blowup, &demoData);
 
     vg.end();
@@ -368,6 +378,9 @@ void Window::render()
         return;
     }
 
+    QElapsedTimer timer;
+    timer.start();
+
     QRhiCommandBuffer *cb = m_sc->currentFrameCommandBuffer();
     QRhiRenderTarget *rt = m_sc->currentFrameRenderTarget();
     const QSize outputSizeInPixels = m_sc->currentPixelSize();
@@ -404,6 +417,8 @@ void Window::render()
     renderTest();
 
     cb->endPass();
+
+    cpuMs = timer.nsecsElapsed() / 1000000.0;
 
     m_rhi->endFrame(m_sc.get());
 
