@@ -6,8 +6,12 @@
 #include <QRhiWidget>
 #include <QVBoxLayout>
 #include <QFile>
+#include <QMouseEvent>
+#include <QKeyEvent>
 #include <rhi/qrhi.h>
 #include "nanovg_rhi.h"
+
+#include "../shared/demo.h"
 
 static float vertexData[] = {
      0.0f,   0.5f,   1.0f, 0.0f, 0.0f,
@@ -21,20 +25,17 @@ static QShader getShader(const QString &name)
     return f.open(QIODevice::ReadOnly) ? QShader::fromSerialized(f.readAll()) : QShader();
 }
 
-static QByteArray getFile(const QString &name)
-{
-    QFile f(name);
-    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
-}
-
 class Widget : public QRhiWidget
 {
 public:
-    Widget(QWidget *parent = nullptr) : QRhiWidget(parent) { }
+    Widget(QWidget *parent = nullptr);
     ~Widget();
 
     void initialize(QRhiCommandBuffer *cb) override;
     void render(QRhiCommandBuffer *cb) override;
+
+    void mouseMoveEvent(QMouseEvent *) override;
+    void keyPressEvent(QKeyEvent *) override;
 
 private:
     QRhi *m_rhi = nullptr;
@@ -52,10 +53,30 @@ private:
     int m_imageId = 0;
 };
 
+Widget::Widget(QWidget *parent)
+    : QRhiWidget(parent)
+{
+    setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
+}
+
 Widget::~Widget()
 {
     if (m_imageId)
         nvgDeleteImage(m_vg.ctx, m_imageId);
+
+    freeDemoData(m_vg.ctx, &demoData);
+}
+
+void Widget::mouseMoveEvent(QMouseEvent *e)
+{
+    demoData.mousePos = e->position().toPoint();
+}
+
+void Widget::keyPressEvent(QKeyEvent *e)
+{
+    if (e->key() == Qt::Key_Space)
+        demoData.blowup = !demoData.blowup;
 }
 
 void Widget::initialize(QRhiCommandBuffer *cb)
@@ -109,14 +130,11 @@ void Widget::initialize(QRhiCommandBuffer *cb)
         cb->resourceUpdate(resourceUpdates);
 
         m_vg.create(m_rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-        QByteArray font = getFile(QLatin1String(":/fonts/RobotoMono-Medium.ttf"));
-        unsigned char *fontData = (unsigned char *) malloc(font.size());
-        memcpy(fontData, font.constData(), font.size());
-        nvgCreateFontMem(m_vg.ctx, "font", fontData, font.size(), 1);
 
-        QImage img;
-        img.load(QLatin1String(":/qtlogo.png"));
-        m_imageId = nvgCreateImageRGBA(m_vg.ctx, img.width(), img.height(), 0, img.constBits());
+        createFont(m_vg.ctx, "font", ":/fonts/RobotoMono-Medium.ttf");
+        m_imageId = createImage(m_vg.ctx, ":/qtlogo.png");
+
+        loadDemoData(m_vg.ctx, &demoData);
     }
 
     const QSize outputSize = renderTarget()->pixelSize();
@@ -152,7 +170,9 @@ void Widget::render(QRhiCommandBuffer *cb)
     nvgFontFace(m_vg.ctx, "font");
     nvgFontSize(m_vg.ctx, 36.0f);
     nvgFillColor(m_vg.ctx, nvgRGBA(220, 0, 220, 255));
-    nvgText(m_vg.ctx, 10, 300, "hello world", nullptr);
+    nvgText(m_vg.ctx, 500, 50, "hello world", nullptr);
+
+    renderDemo(m_vg.ctx, demoData.mousePos.x(), demoData.mousePos.y(), width(), height(), demoData.t, demoData.blowup, &demoData);
 
     m_vg.end();
 
@@ -172,24 +192,9 @@ void Widget::render(QRhiCommandBuffer *cb)
     cb->endPass();
 
     update();
-}
 
-struct ScrollAreaKeyFilter : public QObject
-{
-    ScrollAreaKeyFilter(QObject *target) : m_target(target) { }
-    bool eventFilter(QObject *obj, QEvent *e) override {
-        switch (e->type()) {
-        case QEvent::KeyPress:
-        case QEvent::KeyRelease:
-            QCoreApplication::sendEvent(m_target, e);
-            return true;
-        default:
-            break;
-        }
-        return QObject::eventFilter(obj, e);
-    }
-    QObject *m_target;
-};
+    demoData.t += 0.01f;
+}
 
 int main(int argc, char **argv)
 {

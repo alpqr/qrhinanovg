@@ -1,0 +1,24 @@
+qt6_add_resources(${nanovg_target} "demo_resources"
+    PREFIX
+        "/"
+    BASE
+        "../shared"
+    FILES
+        "../shared/fonts/entypo.ttf"
+        "../shared/fonts/Roboto-Regular.ttf"
+        "../shared/fonts/Roboto-Bold.ttf"
+        "../shared/fonts/NotoEmoji-Regular.ttf"
+
+        "../shared/images/image1.jpg"
+        "../shared/images/image2.jpg"
+        "../shared/images/image3.jpg"
+        "../shared/images/image4.jpg"
+        "../shared/images/image5.jpg"
+        "../shared/images/image6.jpg"
+        "../shared/images/image7.jpg"
+        "../shared/images/image8.jpg"
+        "../shared/images/image9.jpg"
+        "../shared/images/image10.jpg"
+        "../shared/images/image11.jpg"
+        "../shared/images/image12.jpg"
+)

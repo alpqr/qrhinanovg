@@ -6,12 +6,13 @@
 #include <QFile>
 #include <rhi/qrhi.h>
 
-QT_BEGIN_NAMESPACE
+#include "../shared/demo.h"
 
 TestItem::TestItem(QQuickItem *parent)
     : QQuickRhiItem(parent)
 {
     setAcceptedMouseButtons(Qt::LeftButton);
+    setAcceptHoverEvents(true);
 }
 
 QQuickRhiItemRenderer *TestItem::createRenderer()
@@ -27,7 +28,14 @@ void TestItem::mousePressEvent(QMouseEvent *e)
 void TestItem::mouseMoveEvent(QMouseEvent *e)
 {
     e->accept();
-    m_lookPos = e->scenePosition();
+    m_mousePos = e->position();
+    update();
+}
+
+void TestItem::hoverMoveEvent(QHoverEvent *e)
+{
+    e->accept();
+    m_mousePos = e->position();
     update();
 }
 
@@ -36,29 +44,41 @@ void TestItem::mouseMoveEvent(QMouseEvent *e)
 // thread as well, which is perfect for us (since m_vg can just be a member and
 // don't even need a destructor for TestItemRenderer).
 
-static QByteArray getFile(const QString &name)
+TestItemRenderer::~TestItemRenderer()
 {
-    QFile f(name);
-    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    reset();
 }
 
-void TestItemRenderer::initialize(QRhiCommandBuffer *cb)
+void TestItemRenderer::reset()
+{
+    if (m_vg.isValid()) {
+        if (m_imageId)
+            nvgDeleteImage(m_vg.ctx, m_imageId);
+        freeDemoData(m_vg.ctx, &demoData);
+        m_vg.destroy();
+    }
+}
+
+void TestItemRenderer::initialize(QRhiCommandBuffer *)
 {
     if (rhi() != m_rhi) {
         m_rhi = rhi();
-        m_vg.destroy();
+        reset();
     }
+
     if (renderTarget() != m_rt) {
         m_rt = renderTarget();
         // in case the QRhiRenderPassDescriptor is incompatible with the new rt
-        m_vg.destroy();
+        reset();
     }
+
     if (!m_vg.isValid()) {
         m_vg.create(m_rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-        QByteArray font = getFile(QLatin1String(":/fonts/RobotoMono-Medium.ttf"));
-        unsigned char *fontData = (unsigned char *) malloc(font.size());
-        memcpy(fontData, font.constData(), font.size());
-        nvgCreateFontMem(m_vg.ctx, "font", fontData, font.size(), 1);
+
+        createFont(m_vg.ctx, "font", ":/fonts/RobotoMono-Medium.ttf");
+        m_imageId = createImage(m_vg.ctx, ":/qtlogo.png");
+
+        loadDemoData(m_vg.ctx, &demoData);
     }
 }
 
@@ -68,26 +88,31 @@ void TestItemRenderer::synchronize(QQuickRhiItem *rhiItem)
 
     TestItem *item = static_cast<TestItem *>(rhiItem);
     m_dpr = item->window()->effectiveDevicePixelRatio();
-    m_lookPos = item->m_lookPos;
+    demoData.mousePos = item->m_mousePos.toPoint();
+    demoData.t = item->m_t;
+    demoData.blowup = item->m_blowUp;
 }
-
-static void drawEyes(NVGcontext* vg, float x, float y, float w, float h, float mx, float my, float t);
 
 void TestItemRenderer::render(QRhiCommandBuffer *cb)
 {
     m_vg.begin(cb, m_rt, {}, m_dpr);
 
     nvgBeginPath(m_vg.ctx);
-    nvgRect(m_vg.ctx, 10, 10, 100, 100);
-    nvgFillColor(m_vg.ctx, nvgRGBA(220, 0, 0, 255));
+    int imageWidth, imageHeight;
+    nvgImageSize(m_vg.ctx, m_imageId, &imageWidth, &imageHeight);
+    nvgRect(m_vg.ctx, 10, 10, imageWidth, imageHeight);
+    NVGpaint imagePaint = nvgImagePattern(m_vg.ctx, 10, 10, imageWidth, imageHeight, 0, m_imageId, 1);
+    nvgFillPaint(m_vg.ctx, imagePaint);
     nvgFill(m_vg.ctx);
 
     nvgFontFace(m_vg.ctx, "font");
     nvgFontSize(m_vg.ctx, 36.0f);
     nvgFillColor(m_vg.ctx, nvgRGBA(220, 0, 220, 255));
-    nvgText(m_vg.ctx, 10, 300, "hello world", nullptr);
+    nvgText(m_vg.ctx, 500, 50, "hello world", nullptr);
 
-    drawEyes(m_vg.ctx, 200, 10, 120, 120, m_lookPos.x(), m_lookPos.y(), 1);
+    const int w = m_rt->pixelSize().width() / m_dpr;
+    const int h = m_rt->pixelSize().height() / m_dpr;
+    renderDemo(m_vg.ctx, demoData.mousePos.x(), demoData.mousePos.y(), w, h, demoData.t, demoData.blowup, &demoData);
 
     m_vg.end();
 
@@ -95,71 +120,3 @@ void TestItemRenderer::render(QRhiCommandBuffer *cb)
     m_vg.render();
     cb->endPass();
 }
-
-static void drawEyes(NVGcontext* vg, float x, float y, float w, float h, float mx, float my, float t)
-{
-    NVGpaint gloss, bg;
-    float ex = w *0.23f;
-    float ey = h * 0.5f;
-    float lx = x + ex;
-    float ly = y + ey;
-    float rx = x + w - ex;
-    float ry = y + ey;
-    float dx,dy,d;
-    float br = (ex < ey ? ex : ey) * 0.5f;
-    float blink = 1 - pow(sinf(t*0.5f),200)*0.8f;
-
-    bg = nvgLinearGradient(vg, x,y+h*0.5f,x+w*0.1f,y+h, nvgRGBA(0,0,0,32), nvgRGBA(0,0,0,16));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx+3.0f,ly+16.0f, ex,ey);
-    nvgEllipse(vg, rx+3.0f,ry+16.0f, ex,ey);
-    nvgFillPaint(vg, bg);
-    nvgFill(vg);
-
-    bg = nvgLinearGradient(vg, x,y+h*0.25f,x+w*0.1f,y+h, nvgRGBA(220,220,220,255), nvgRGBA(128,128,128,255));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx,ly, ex,ey);
-    nvgEllipse(vg, rx,ry, ex,ey);
-    nvgFillPaint(vg, bg);
-    nvgFill(vg);
-
-    dx = (mx - rx) / (ex * 10);
-    dy = (my - ry) / (ey * 10);
-    d = sqrtf(dx*dx+dy*dy);
-    if (d > 1.0f) {
-        dx /= d; dy /= d;
-    }
-    dx *= ex*0.4f;
-    dy *= ey*0.5f;
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx+dx,ly+dy+ey*0.25f*(1-blink), br,br*blink);
-    nvgFillColor(vg, nvgRGBA(32,32,32,255));
-    nvgFill(vg);
-
-    dx = (mx - rx) / (ex * 10);
-    dy = (my - ry) / (ey * 10);
-    d = sqrtf(dx*dx+dy*dy);
-    if (d > 1.0f) {
-        dx /= d; dy /= d;
-    }
-    dx *= ex*0.4f;
-    dy *= ey*0.5f;
-    nvgBeginPath(vg);
-    nvgEllipse(vg, rx+dx,ry+dy+ey*0.25f*(1-blink), br,br*blink);
-    nvgFillColor(vg, nvgRGBA(32,32,32,255));
-    nvgFill(vg);
-
-    gloss = nvgRadialGradient(vg, lx-ex*0.25f,ly-ey*0.5f, ex*0.1f,ex*0.75f, nvgRGBA(255,255,255,128), nvgRGBA(255,255,255,0));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx,ly, ex,ey);
-    nvgFillPaint(vg, gloss);
-    nvgFill(vg);
-
-    gloss = nvgRadialGradient(vg, rx-ex*0.25f,ry-ey*0.5f, ex*0.1f,ex*0.75f, nvgRGBA(255,255,255,128), nvgRGBA(255,255,255,0));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, rx,ry, ex,ey);
-    nvgFillPaint(vg, gloss);
-    nvgFill(vg);
-}
-
-QT_END_NAMESPACE

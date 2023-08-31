@@ -29,6 +29,8 @@ qt6_add_shaders(nanowindow "shaders"
         color.frag
 )
 
+include(../shared/demo.cmakeinc)
+
 qt6_add_resources(nanowindow "resources"
     PREFIX
         "/"
@@ -36,4 +38,5 @@ qt6_add_resources(nanowindow "resources"
         "../shared"
     FILES
         "../shared/fonts/RobotoMono-Medium.ttf"
+        "../shared/qtlogo.png"
 )

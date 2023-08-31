@@ -28,6 +28,8 @@ qt6_add_shaders(nanorhiwidget "shaders"
         color.frag
 )
 
+include(../shared/demo.cmakeinc)
+
 qt6_add_resources(nanorhiwidget "resources"
     PREFIX
         "/"

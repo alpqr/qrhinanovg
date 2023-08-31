@@ -11,231 +11,53 @@
 
 #include "nanovg_rhi.h"
 
-static QByteArray getFile(const QString &name)
-{
-    QFile f(name);
-    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
-}
+#include "../shared/demo.h"
 
 NanoVG vg;
+int imageId = 0;
 
 // called once
 void initTest(QRhi *rhi)
 {
     vg.create(rhi, NVG_ANTIALIAS | NVG_STENCIL_STROKES);
 
-    QByteArray font = getFile(QLatin1String(":/fonts/RobotoMono-Medium.ttf"));
-    unsigned char *fontData = (unsigned char *) malloc(font.size());
-    memcpy(fontData, font.constData(), font.size());
+    createFont(vg.ctx, "font", ":/fonts/RobotoMono-Medium.ttf");
+    imageId = createImage(vg.ctx, ":/qtlogo.png");
 
-    nvgCreateFontMem(vg.ctx, "font", fontData, font.size(), 1);
+    loadDemoData(vg.ctx, &demoData);
 }
 
 void cleanupTest()
 {
+    if (imageId)
+        nvgDeleteImage(vg.ctx, imageId);
+
+    freeDemoData(vg.ctx, &demoData);
+
     vg.destroy();
 }
 
-void drawEyes(NVGcontext* vg, float x, float y, float w, float h, float mx, float my, float t)
-{
-    NVGpaint gloss, bg;
-    float ex = w *0.23f;
-    float ey = h * 0.5f;
-    float lx = x + ex;
-    float ly = y + ey;
-    float rx = x + w - ex;
-    float ry = y + ey;
-    float dx,dy,d;
-    float br = (ex < ey ? ex : ey) * 0.5f;
-    float blink = 1 - pow(sinf(t*0.5f),200)*0.8f;
-
-    bg = nvgLinearGradient(vg, x,y+h*0.5f,x+w*0.1f,y+h, nvgRGBA(0,0,0,32), nvgRGBA(0,0,0,16));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx+3.0f,ly+16.0f, ex,ey);
-    nvgEllipse(vg, rx+3.0f,ry+16.0f, ex,ey);
-    nvgFillPaint(vg, bg);
-    nvgFill(vg);
-
-    bg = nvgLinearGradient(vg, x,y+h*0.25f,x+w*0.1f,y+h, nvgRGBA(220,220,220,255), nvgRGBA(128,128,128,255));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx,ly, ex,ey);
-    nvgEllipse(vg, rx,ry, ex,ey);
-    nvgFillPaint(vg, bg);
-    nvgFill(vg);
-
-    dx = (mx - rx) / (ex * 10);
-    dy = (my - ry) / (ey * 10);
-    d = sqrtf(dx*dx+dy*dy);
-    if (d > 1.0f) {
-        dx /= d; dy /= d;
-    }
-    dx *= ex*0.4f;
-    dy *= ey*0.5f;
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx+dx,ly+dy+ey*0.25f*(1-blink), br,br*blink);
-    nvgFillColor(vg, nvgRGBA(32,32,32,255));
-    nvgFill(vg);
-
-    dx = (mx - rx) / (ex * 10);
-    dy = (my - ry) / (ey * 10);
-    d = sqrtf(dx*dx+dy*dy);
-    if (d > 1.0f) {
-        dx /= d; dy /= d;
-    }
-    dx *= ex*0.4f;
-    dy *= ey*0.5f;
-    nvgBeginPath(vg);
-    nvgEllipse(vg, rx+dx,ry+dy+ey*0.25f*(1-blink), br,br*blink);
-    nvgFillColor(vg, nvgRGBA(32,32,32,255));
-    nvgFill(vg);
-
-    gloss = nvgRadialGradient(vg, lx-ex*0.25f,ly-ey*0.5f, ex*0.1f,ex*0.75f, nvgRGBA(255,255,255,128), nvgRGBA(255,255,255,0));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, lx,ly, ex,ey);
-    nvgFillPaint(vg, gloss);
-    nvgFill(vg);
-
-    gloss = nvgRadialGradient(vg, rx-ex*0.25f,ry-ey*0.5f, ex*0.1f,ex*0.75f, nvgRGBA(255,255,255,128), nvgRGBA(255,255,255,0));
-    nvgBeginPath(vg);
-    nvgEllipse(vg, rx,ry, ex,ey);
-    nvgFillPaint(vg, gloss);
-    nvgFill(vg);
-}
-
-void drawGraph(NVGcontext* vg, float x, float y, float w, float h, float t)
-{
-    NVGpaint bg;
-    float samples[6];
-    float sx[6], sy[6];
-    float dx = w/5.0f;
-    int i;
-
-    samples[0] = (1+sinf(t*1.2345f+cosf(t*0.33457f)*0.44f))*0.5f;
-    samples[1] = (1+sinf(t*0.68363f+cosf(t*1.3f)*1.55f))*0.5f;
-    samples[2] = (1+sinf(t*1.1642f+cosf(t*0.33457)*1.24f))*0.5f;
-    samples[3] = (1+sinf(t*0.56345f+cosf(t*1.63f)*0.14f))*0.5f;
-    samples[4] = (1+sinf(t*1.6245f+cosf(t*0.254f)*0.3f))*0.5f;
-    samples[5] = (1+sinf(t*0.345f+cosf(t*0.03f)*0.6f))*0.5f;
-
-    for (i = 0; i < 6; i++) {
-        sx[i] = x+i*dx;
-        sy[i] = y+h*samples[i]*0.8f;
-    }
-
-    // Graph background
-    bg = nvgLinearGradient(vg, x,y,x,y+h, nvgRGBA(0,160,192,0), nvgRGBA(0,160,192,64));
-    nvgBeginPath(vg);
-    nvgMoveTo(vg, sx[0], sy[0]);
-    for (i = 1; i < 6; i++)
-        nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1], sx[i]-dx*0.5f,sy[i], sx[i],sy[i]);
-    nvgLineTo(vg, x+w, y+h);
-    nvgLineTo(vg, x, y+h);
-    nvgFillPaint(vg, bg);
-    nvgFill(vg);
-
-    // Graph line
-    nvgBeginPath(vg);
-    nvgMoveTo(vg, sx[0], sy[0]+2);
-    for (i = 1; i < 6; i++)
-        nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1]+2, sx[i]-dx*0.5f,sy[i]+2, sx[i],sy[i]+2);
-    nvgStrokeColor(vg, nvgRGBA(0,0,0,32));
-    nvgStrokeWidth(vg, 3.0f);
-    nvgStroke(vg);
-
-    nvgBeginPath(vg);
-    nvgMoveTo(vg, sx[0], sy[0]);
-    for (i = 1; i < 6; i++)
-        nvgBezierTo(vg, sx[i-1]+dx*0.5f,sy[i-1], sx[i]-dx*0.5f,sy[i], sx[i],sy[i]);
-    nvgStrokeColor(vg, nvgRGBA(0,160,192,255));
-    nvgStrokeWidth(vg, 3.0f);
-    nvgStroke(vg);
-
-    // Graph sample pos
-    for (i = 0; i < 6; i++) {
-        bg = nvgRadialGradient(vg, sx[i],sy[i]+2, 3.0f,8.0f, nvgRGBA(0,0,0,32), nvgRGBA(0,0,0,0));
-        nvgBeginPath(vg);
-        nvgRect(vg, sx[i]-10, sy[i]-10+2, 20,20);
-        nvgFillPaint(vg, bg);
-        nvgFill(vg);
-    }
-
-    nvgBeginPath(vg);
-    for (i = 0; i < 6; i++)
-        nvgCircle(vg, sx[i], sy[i], 4.0f);
-    nvgFillColor(vg, nvgRGBA(0,160,192,255));
-    nvgFill(vg);
-    nvgBeginPath(vg);
-    for (i = 0; i < 6; i++)
-        nvgCircle(vg, sx[i], sy[i], 2.0f);
-    nvgFillColor(vg, nvgRGBA(220,220,220,255));
-    nvgFill(vg);
-
-    nvgStrokeWidth(vg, 1.0f);
-}
-
 // called on every frame outside the render pass
-void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, const QPointF &mousePos)
+void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt)
 {
     vg.begin(cb, rt);
 
     nvgBeginPath(vg.ctx);
-    nvgRect(vg.ctx, 10, 10, 200, 200);
-    nvgFillColor(vg.ctx, nvgRGBA(255, 0, 0, 255));
+    int imageWidth, imageHeight;
+    nvgImageSize(vg.ctx, imageId, &imageWidth, &imageHeight);
+    nvgRect(vg.ctx, 10, 10, imageWidth, imageHeight);
+    NVGpaint imagePaint = nvgImagePattern(vg.ctx, 10, 10, imageWidth, imageHeight, 0, imageId, 1);
+    nvgFillPaint(vg.ctx, imagePaint);
     nvgFill(vg.ctx);
 
     nvgFontFace(vg.ctx, "font");
     nvgFontSize(vg.ctx, 36.0f);
     nvgFillColor(vg.ctx, nvgRGBA(220, 0, 220, 255));
-    nvgText(vg.ctx, 10, 300, "hello world", nullptr);
+    nvgText(vg.ctx, 500, 50, "hello world", nullptr);
 
-
-    float x = 300;
-    float y = 10;
-    float w = 500;
-    float h = 500;
-    float cornerRadius = 10.0;
-    // Window
-    nvgBeginPath(vg.ctx);
-    nvgRoundedRect(vg.ctx, x,y, w,h, cornerRadius);
-    nvgFillColor(vg.ctx, nvgRGBA(28,30,34,192));
-    //	nvgFillColor(vg.ctx, nvgRGBA(0,0,0,128));
-    nvgFill(vg.ctx);
-
-    // Drop shadow
-    NVGpaint  shadowPaint = nvgBoxGradient(vg.ctx, x,y+2, w,h, cornerRadius*2, 10, nvgRGBA(0,0,0,128), nvgRGBA(0,0,0,0));
-    nvgBeginPath(vg.ctx);
-    nvgRect(vg.ctx, x-10,y-10, w+20,h+30);
-    nvgRoundedRect(vg.ctx, x,y, w,h, cornerRadius);
-    nvgPathWinding(vg.ctx, NVG_HOLE);
-    nvgFillPaint(vg.ctx, shadowPaint);
-    nvgFill(vg.ctx);
-
-    // Header
-    NVGpaint  headerPaint = nvgLinearGradient(vg.ctx, x,y,x,y+15, nvgRGBA(255,255,255,8), nvgRGBA(0,0,0,16));
-    nvgBeginPath(vg.ctx);
-    nvgRoundedRect(vg.ctx, x+1,y+1, w-2,30, cornerRadius-1);
-    nvgFillPaint(vg.ctx, headerPaint);
-    nvgFill(vg.ctx);
-    nvgBeginPath(vg.ctx);
-    nvgMoveTo(vg.ctx, x+0.5f, y+0.5f+30);
-    nvgLineTo(vg.ctx, x+0.5f+w-1, y+0.5f+30);
-    nvgStrokeColor(vg.ctx, nvgRGBA(0,0,0,32));
-    nvgStroke(vg.ctx);
-
-    nvgFontSize(vg.ctx, 15.0f);
-    nvgFontFace(vg.ctx, "font");
-    nvgTextAlign(vg.ctx,NVG_ALIGN_CENTER|NVG_ALIGN_MIDDLE);
-
-    nvgFontBlur(vg.ctx, 2);
-    nvgFillColor(vg.ctx, nvgRGBA(0,0,0,128));
-    nvgText(vg.ctx, x+w/2,y+16+1, "title", NULL);
-
-    nvgFontBlur(vg.ctx,0);
-    nvgFillColor(vg.ctx, nvgRGBA(220,220,220,160));
-    nvgText(vg.ctx, x+w/2,y+16, "title", NULL);
-
-    drawEyes(vg.ctx, 600, 600, 120, 120, mousePos.x(), mousePos.y(), 1);
-    drawGraph(vg.ctx, 200, 500, 100, 100, 1.0);
+    const int w = rt->pixelSize().width() / rt->devicePixelRatio();
+    const int h = rt->pixelSize().height() / rt->devicePixelRatio();
+    renderDemo(vg.ctx, demoData.mousePos.x(), demoData.mousePos.y(), w, h, demoData.t, demoData.blowup, &demoData);
 
     vg.end();
 }
@@ -244,6 +66,8 @@ void prepareRenderTest(QRhiCommandBuffer *cb, QRhiRenderTarget *rt, const QPoint
 void renderTest()
 {
     vg.render();
+
+    demoData.t += 0.01f;
 }
 
 static float vertexData[] = {
@@ -284,6 +108,7 @@ struct Window : public QWindow
     void exposeEvent(QExposeEvent *) override;
     bool event(QEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;
+    void keyPressEvent(QKeyEvent *) override;
 
     bool m_running = false;
     bool m_notExposed = false;
@@ -298,7 +123,6 @@ struct Window : public QWindow
     float m_rotation = 0;
     float m_opacity = 1;
     int m_opacityDir = -1;
-    QPointF m_mousePos;
 };
 
 Window::Window(QRhi::Implementation graphicsApi, bool debugLayer)
@@ -371,7 +195,13 @@ bool Window::event(QEvent *e)
 
 void Window::mouseMoveEvent(QMouseEvent *e)
 {
-    m_mousePos = e->scenePosition();
+    demoData.mousePos = e->position().toPoint();
+}
+
+void Window::keyPressEvent(QKeyEvent *e)
+{
+    if (e->key() == Qt::Key_Space)
+        demoData.blowup = !demoData.blowup;
 }
 
 void Window::init()
@@ -559,7 +389,7 @@ void Window::render()
     u->updateDynamicBuffer(m_ubuf.get(), 64, 4, &m_opacity);
 
     m_rhi->makeThreadLocalNativeContextCurrent();
-    prepareRenderTest(cb, rt, m_mousePos);
+    prepareRenderTest(cb, rt);
 
     cb->beginPass(rt, QColor::fromRgbF(0.4f, 0.7f, 0.0f, 1.0f), { 1.0f, 0 }, u);
 

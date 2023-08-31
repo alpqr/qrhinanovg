@@ -37,6 +37,8 @@ qt_add_qml_module(nanoitem
 TARGET_COMPILE_DEFINITIONS(nanoitem
   PRIVATE $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:QT_QML_DEBUG>)
 
+include(../shared/demo.cmakeinc)
+
 qt_add_resources(nanoitem "resources"
     PREFIX
         "/"
@@ -44,4 +46,5 @@ qt_add_resources(nanoitem "resources"
         "../shared"
     FILES
         "../shared/fonts/RobotoMono-Medium.ttf"
+        "../shared/qtlogo.png"
 )
