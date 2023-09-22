@@ -10,7 +10,16 @@ rely on work-in-progress Qt 6.7 APIs (QRhiWidget, QQuickRhiItem).
 Won't build with older Qt versions, although the integration and the
 QWindow-based example could be backported.
 
+For a higher level, Qt-style API that completely wraps NanoVG, check out
+https://github.com/QUItCoding/qnanopainter which currently contains the a
+slightly modified version of the code here as an experimental option.
+
+In contrast, this repo and the examples here focus on directly working with the
+NanoVG API (no wrappers) while rendering to any QRhi-based render target.
+
 This NanoVG adaptation is somewhat different from others since a plain nvgBeginFrame/EndFrame is not suitable.
+
+Usage:
 
 ```
 NanoVG vg;
