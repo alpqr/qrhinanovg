@@ -1081,9 +1081,11 @@ static void renderEndPrepare(void* uptr)
         commitResourceUpdates(rc);
 
         const int dummyTexId = findTexture(rc, rc->dummyTex)->id;
-        QRhiShaderResourceBindings *&srbWithDummyTexture(rc->srbs[dummyTexId]);
-        if (!srbWithDummyTexture)
+        QRhiShaderResourceBindings *srbWithDummyTexture = rc->srbs[dummyTexId];
+        if (!srbWithDummyTexture) {
             srbWithDummyTexture = createSrb(rc, dummyTexId);
+            rc->srbs[dummyTexId] = srbWithDummyTexture;
+        }
 
         QRhiShaderResourceBindings *srbForLayout = srbWithDummyTexture; // all of them are layout-compatible, could use any
 
@@ -1091,9 +1093,11 @@ static void renderEndPrepare(void* uptr)
             RHINVGcall *call = &rc->calls[i];
             QRhiRenderPassDescriptor *rpDesc = rc->rt->renderPassDescriptor();
 
-            QRhiShaderResourceBindings *&srbWithCallTexture(rc->srbs[call->image]);
-            if (!srbWithCallTexture)
+            QRhiShaderResourceBindings *srbWithCallTexture = rc->srbs[call->image];
+            if (!srbWithCallTexture) {
                 srbWithCallTexture = createSrb(rc, call->image);
+                rc->srbs[call->image] = srbWithCallTexture;
+            }
 
             RHINVGpipelineState basePs;
             basePs.edgeAA = (rc->flags & NVG_ANTIALIAS) != 0;
