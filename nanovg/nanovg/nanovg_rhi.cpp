@@ -1369,6 +1369,10 @@ static void renderDelete(void* uptr)
     free(rc->uniforms);
     free(rc->calls);
 
+    // If no render occured before destroy, returns the QRhiResourceUpdateBatch to the pool
+    if (rc->resourceUpdates)
+        rc->resourceUpdates->release();
+
     delete rc;
 }
 
